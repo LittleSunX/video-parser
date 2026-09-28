@@ -1,0 +1,20 @@
+{
+  "name": "video-parser",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "worker"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.cjs",
+    "check:frontend": "node scripts/check-frontend.cjs",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:worker": "npm run dev --workspace worker",
+    "build": "npm run build --workspace frontend && npm run typecheck --workspace worker",
+    "deploy:worker": "npm run deploy --workspace worker"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
