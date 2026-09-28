@@ -560,3 +560,13 @@ a {
   background: #f8fafc;
   color: #475569;
 }
+
+
+.disclaimer {
+  margin: 28px auto 0;
+  max-width: 720px;
+  color: #9299a8;
+  font-size: 12px;
+  line-height: 1.8;
+  text-align: center;
+}
