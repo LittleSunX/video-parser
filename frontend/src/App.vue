@@ -396,5 +396,9 @@ onBeforeUnmount(() => {
         </p>
       </div>
     </section>
+
+    <footer class="disclaimer">
+      本工具仅用于公开内容的解析辅助，请遵守相关法律法规及平台规则。解析内容版权归原作者或相关权利人所有，请勿用于侵权传播、未经授权的商业用途或其他违法违规行为。因不当使用产生的相关责任由使用者自行承担。
+    </footer>
   </main>
 </template>
