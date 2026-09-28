@@ -46,13 +46,13 @@
 
 👉 **[https://wind-video.ccwu.cc/](https://wind-video.ccwu.cc/)**
 
-生产 API：
+Demo API：
 
 ```text
 https://api.wind-video.ccwu.cc
 ```
 
-健康检查：
+Demo API 健康检查：
 
 ```text
 https://api.wind-video.ccwu.cc/api/health
@@ -413,20 +413,22 @@ npm run build
 
 ## ☁️ 部署
 
-当前线上架构：
+推荐部署架构：
 
 ```text
-https://wind-video.ccwu.cc
-          │
-          ▼
-        Vercel
-          │
-          ▼
-https://api.wind-video.ccwu.cc
-          │
-          ▼
- Cloudflare Workers
+https://your-frontend-domain.example
+               │
+               ▼
+             Vercel
+               │
+               ▼
+https://your-worker-domain.example
+               │
+               ▼
+      Cloudflare Workers
 ```
+
+> 上面的域名仅为示例，请替换为你自己的前端域名和 Worker 域名。
 
 ### Cloudflare Worker
 
@@ -448,19 +450,19 @@ Worker：
 video-parser-api
 ```
 
-默认地址：
+默认 Worker 地址格式：
 
 ```text
-https://video-parser-api.wind-lab.workers.dev
+https://<worker-name>.<your-subdomain>.workers.dev
 ```
 
-生产环境：
+如需自定义域名，可在 Cloudflare Workers 中绑定，例如：
 
 ```text
-https://api.wind-video.ccwu.cc
+https://api.example.com
 ```
 
-重新部署 Worker 不需要重新绑定自定义域名。
+重新部署 Worker 不需要重新绑定已经配置好的自定义域名。
 
 ### Vercel
 
@@ -476,7 +478,7 @@ https://api.wind-video.ccwu.cc
 环境变量：
 
 ```env
-VITE_API_BASE_URL=https://api.wind-video.ccwu.cc
+VITE_API_BASE_URL=https://your-worker-domain.example
 ```
 
 修改 `VITE_*` 环境变量后需要重新部署，因为 Vite 会在构建阶段写入这些值。
