@@ -1,4 +1,12 @@
-import { downloadMediaArchive } from '../utils/batch-download'
+import {
+  downloadMediaArchive,
+  createBatchSession,
+  clearBatchSession,
+  saveArchivePart,
+  type BatchSession,
+  type BatchItemStatus,
+} from '../utils/batch-download'
+import { MediaDownloadError } from '../utils/download-error'
 import { ref, onScopeDispose, type Ref } from 'vue'
 import type { VideoInfo } from '../types/video'
 import { downloadDirectVideo } from '../utils/auto-download'
@@ -19,6 +27,16 @@ export function useMediaDownloads(
 ) {
   const batchDownloading = ref(false)
   const batchProgress = ref('')
+  const batchItems = ref<BatchItemStatus[]>([])
+  const batchCanRetry = ref(false)
+  const batchHasCache = ref(false)
+  const batchPart = ref<{ number: number; count: number; size: number; final: boolean } | null>(
+    null,
+  )
+  const batchCanContinue = ref(false)
+  let batchSession: BatchSession | undefined
+  let batchKey = ''
+  let batchPreferLive = true
   const videoDownloading = ref(false)
   const downloadStatus = ref('')
   const downloadState = ref<'receiving' | 'handed-off' | 'fallback' | 'cancelled'>('receiving')
@@ -131,6 +149,14 @@ export function useMediaDownloads(
     batchController = undefined
     batchDownloading.value = false
     batchProgress.value = ''
+    if (batchSession) clearBatchSession(batchSession)
+    batchSession = undefined
+    batchKey = ''
+    batchPart.value = null
+    batchCanContinue.value = false
+    batchItems.value = []
+    batchCanRetry.value = false
+    batchHasCache.value = false
   }
 
   async function handleBatchDownload(preferLive: boolean) {
@@ -145,6 +171,18 @@ export function useMediaDownloads(
     })
     if (!jobs.length) return
 
+    const key = JSON.stringify(jobs)
+    if (!batchSession || batchKey !== key) {
+      stopBatchDownload()
+      batchSession = createBatchSession(jobs)
+      batchKey = key
+    }
+    const session = batchSession
+    batchPreferLive = preferLive
+    batchCanRetry.value = false
+    batchCanContinue.value = false
+    batchItems.value = session.items.map((item) => ({ ...item }))
+    batchProgress.value = '正在获取未完成的文件…'
     const controller = new AbortController()
     batchController = controller
     batchDownloading.value = true
@@ -156,10 +194,34 @@ export function useMediaDownloads(
         (message) => {
           if (batchController === controller) batchProgress.value = message
         },
+        session,
+        (items) => {
+          if (batchController === controller) batchItems.value = items
+        },
       )
+      if (batchController !== controller) return
+      if (session.part) {
+        const part = session.part
+        batchPart.value = {
+          number: part.number,
+          count: part.count,
+          size: part.blob.size,
+          final: part.final,
+        }
+        batchHasCache.value = true
+        showNotice(`第 ${part.number} 包已准备好，请点击保存`, 6000)
+        return
+      }
+      batchSession = undefined
+      batchHasCache.value = false
       showNotice('已请求浏览器保存 ZIP，解压后可查看全部文件', 6000)
     } catch (error) {
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || batchController !== controller) return
+      batchCanRetry.value = !(
+        error instanceof MediaDownloadError &&
+        ['TOO_LARGE', 'EXPIRED', 'INVALID_MEDIA'].includes(error.code)
+      )
+      batchHasCache.value = session.files.size > 0
       batchProgress.value = error instanceof Error ? error.message : '批量下载失败，请重试'
       showNotice(batchProgress.value, 6000)
     } finally {
@@ -170,6 +232,31 @@ export function useMediaDownloads(
     }
   }
 
+  function saveBatchPart() {
+    if (!batchSession?.part || batchDownloading.value) return
+    const number = batchSession.part.number
+    try {
+      const final = saveArchivePart(batchSession)
+      batchPart.value = null
+      batchHasCache.value = false
+      batchCanContinue.value = !final
+      batchProgress.value = final
+        ? '全部分包已请求浏览器保存，请查看下载列表'
+        : `第 ${number} 包已请求浏览器保存，请确认后继续下一包`
+      if (final) batchSession = undefined
+    } catch {
+      showNotice('未能发起保存，请再次点击保存当前包')
+    }
+  }
+
+  function continueBatchDownload() {
+    if (batchCanContinue.value) return handleBatchDownload(batchPreferLive)
+  }
+
+  function retryBatchDownload() {
+    if (batchCanRetry.value) return handleBatchDownload(batchPreferLive)
+  }
+
   function handleDownloadMusic() {
     const current = video.value
     if (!current?.musicUrl) return
@@ -177,13 +264,23 @@ export function useMediaDownloads(
     showNotice('已发起背景音乐下载')
   }
 
+  window.addEventListener?.('pagehide', stopBatchDownload)
   onScopeDispose(() => {
+    window.removeEventListener?.('pagehide', stopBatchDownload)
     stopBatchDownload()
     cancelVideoDownload()
   })
   return {
     batchDownloading,
     batchProgress,
+    batchItems,
+    batchCanRetry,
+    batchHasCache,
+    batchPart,
+    batchCanContinue,
+    saveBatchPart,
+    continueBatchDownload,
+    retryBatchDownload,
     videoDownloading,
     downloadStatus,
     downloadState,

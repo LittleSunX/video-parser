@@ -1,3 +1,4 @@
+import * as batchArchive from '../frontend/src/utils/batch-download'
 import { unzipSync } from 'fflate'
 import { test, afterEach, vi } from 'vitest'
 import assert from 'node:assert/strict'
@@ -271,11 +272,11 @@ test('mixed batches retain still images and reject oversized responses without s
   ])
   global.fetch = async () =>
     new Response('large', {
-      headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(65 * 1024 * 1024) },
+      headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(129 * 1024 * 1024) },
     })
   await app.handleDownloadAllPreferred()
   assert.equal(clicks.length, 1)
-  assert.match(app.batchProgress.value, /64 MB/)
+  assert.match(app.batchProgress.value, /128 MB/)
   assert.equal(app.batchDownloading.value, false)
 })
 
@@ -372,7 +373,7 @@ test('large files bypass blob buffering and use the native download path', async
     new Response('large file', {
       headers: {
         'Content-Type': 'video/mp4',
-        'Content-Length': String(65 * 1024 * 1024),
+        'Content-Length': String(129 * 1024 * 1024),
       },
     })
   const { app, downloads } = createApp()
@@ -421,4 +422,150 @@ test('a partial image list does not prevent fallback from recovering missing ima
   const result = await new DouyinParser().parse(url)
   assert.equal(calls, 2)
   assert.equal(result.images.length, 2)
+})
+
+test('batch retry reuses successful files and only fetches unfinished items', async () => {
+  const { clicks, blobs } = mockBrowserSave()
+  const { app } = createApp()
+  app.video.value = { images: [1, 2, 3].map((i) => ({ url: 'https://image/' + i })) }
+  const requests = []
+  let broken = true
+  global.fetch = async (url) => {
+    requests.push(url)
+    if (url.endsWith('2') && broken) throw new TypeError('offline')
+    return new Response(new Uint8Array([Number(url.slice(-1))]), {
+      headers: { 'Content-Type': 'image/jpeg' },
+    })
+  }
+  await app.handleDownloadAllOriginals()
+  assert.equal(clicks.length, 0)
+  assert.equal(app.batchCanRetry.value, true)
+  assert.equal(app.batchHasCache.value, true)
+  assert.deepEqual(
+    app.batchItems.value.map((item) => item.state),
+    ['ready', 'failed', 'pending'],
+  )
+  requests.length = 0
+  broken = false
+  await app.retryBatchDownload()
+  assert.deepEqual(requests, ['https://image/2', 'https://image/3'])
+  assert.equal(clicks.length, 1)
+  const files = unzipSync(new Uint8Array(await blobs[0].arrayBuffer()))
+  assert.deepEqual(
+    Object.values(files).map((bytes) => [...bytes]),
+    [[1], [2], [3]],
+  )
+  assert.equal(app.batchHasCache.value, false)
+  assert.equal(app.batchCanRetry.value, false)
+})
+
+test('discarding a failed batch clears cached files before the next attempt', async () => {
+  mockBrowserSave()
+  const { app } = createApp()
+  app.video.value = { images: [1, 2].map((i) => ({ url: 'https://image/' + i })) }
+  let requests = []
+  global.fetch = async (url) => {
+    requests.push(url)
+    if (url.endsWith('2')) throw new TypeError('offline')
+    return new Response('image', { headers: { 'Content-Type': 'image/jpeg' } })
+  }
+  await app.handleDownloadAllOriginals()
+  assert.equal(app.batchHasCache.value, true)
+  app.stopBatchDownload()
+  assert.equal(app.batchHasCache.value, false)
+  assert.equal(app.batchItems.value.length, 0)
+  requests = []
+  await app.handleDownloadAllOriginals()
+  assert.equal(requests[0], 'https://image/1')
+})
+
+test('batch distinguishes expired resources and size limits from retryable network errors', async () => {
+  const { clicks } = mockBrowserSave()
+  const { app } = createApp()
+  app.video.value = { images: [{ url: 'https://image/1' }] }
+  global.fetch = async () => new Response('expired', { status: 403 })
+  await app.handleDownloadAllOriginals()
+  assert.match(app.batchProgress.value, /重新解析/)
+  assert.equal(app.batchCanRetry.value, false)
+  let requests = 0
+  global.fetch = async () => {
+    requests++
+    return new Response('large', {
+      headers: { 'Content-Type': 'image/jpeg', 'Content-Length': String(129 * 1024 * 1024) },
+    })
+  }
+  await app.handleDownloadAllOriginals()
+  assert.equal(requests, 1)
+  assert.match(app.batchProgress.value, /128 MB/)
+  assert.equal(app.batchCanRetry.value, false)
+  assert.equal(clicks.length, 0)
+})
+
+test('switching batch mode drops cached dynamic files and reparse clears failed state', async () => {
+  const { blobs } = mockBrowserSave()
+  const { app } = createApp(async () => ({ mediaType: 'image', images: [] }))
+  app.video.value = {
+    images: [1, 2].map((i) => ({ url: 'https://image/' + i, livePhotoUrl: 'https://live/' + i })),
+  }
+  let failLive = true
+  const requests = []
+  global.fetch = async (url) => {
+    requests.push(url)
+    if (url.includes('live') && url.endsWith('2') && failLive) throw new TypeError('offline')
+    return new Response('media', {
+      headers: { 'Content-Type': url.includes('live') ? 'video/mp4' : 'image/jpeg' },
+    })
+  }
+  await app.handleDownloadAllPreferred()
+  assert.equal(app.batchHasCache.value, true)
+  requests.length = 0
+  await app.handleDownloadAllOriginals()
+  assert.deepEqual(requests, ['https://image/1', 'https://image/2'])
+  assert.deepEqual(Object.keys(unzipSync(new Uint8Array(await blobs[0].arrayBuffer()))), [
+    '0.jpg',
+    '1.jpg',
+  ])
+  await app.handleDownloadAllPreferred()
+  assert.equal(app.batchHasCache.value, true)
+  failLive = false
+  app.input.value = url
+  await app.handleParse()
+  assert.equal(app.batchHasCache.value, false)
+  assert.equal(app.batchCanRetry.value, false)
+  assert.equal(app.batchItems.value.length, 0)
+})
+
+test('batch UI pauses at each package until save and continue are clicked', async () => {
+  const createSession = batchArchive.createBatchSession
+  vi.spyOn(batchArchive, 'createBatchSession').mockImplementation((jobs) => createSession(jobs, 6))
+  const { clicks, blobs } = mockBrowserSave()
+  const { app } = createApp()
+  app.video.value = { images: [1, 2].map((i) => ({ url: 'https://image/' + i })) }
+  const requests = []
+  global.fetch = async (url) => {
+    requests.push(url)
+    return new Response(new Uint8Array(6).fill(Number(url.slice(-1))), {
+      headers: { 'Content-Type': 'image/jpeg', 'Content-Length': '6' },
+    })
+  }
+  await app.handleDownloadAllOriginals()
+  assert.equal(clicks.length, 0)
+  assert.equal(app.batchPart.value.number, 1)
+  assert.equal(app.batchCanContinue.value, false)
+  await app.continueBatchDownload()
+  assert.deepEqual(requests, ['https://image/1'])
+  app.saveBatchPart()
+  assert.equal(clicks.length, 1)
+  assert.equal(app.batchPart.value, null)
+  assert.equal(app.batchCanContinue.value, true)
+  await app.continueBatchDownload()
+  assert.equal(app.batchPart.value.number, 2)
+  assert.equal(app.batchPart.value.final, true)
+  assert.equal(clicks.length, 1)
+  app.saveBatchPart()
+  assert.equal(clicks.length, 2)
+  assert.equal(app.batchCanContinue.value, false)
+  assert.match(app.batchProgress.value, /全部分包/)
+  assert.deepEqual(Object.keys(unzipSync(new Uint8Array(await blobs[0].arrayBuffer()))), ['0.jpg'])
+  assert.deepEqual(Object.keys(unzipSync(new Uint8Array(await blobs[1].arrayBuffer()))), ['1.jpg'])
 })

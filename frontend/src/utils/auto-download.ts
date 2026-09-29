@@ -1,14 +1,16 @@
+import { MediaDownloadError, responseDownloadError } from './download-error'
 const MAX_BUFFER_BYTES = 64 * 1024 * 1024
 
 interface DownloadOptions {
   signal: AbortSignal
+  totalTimeoutMs?: number
   onProgress: (received: number, total?: number) => void
 }
 
 /** 受限读取媒体内容，支持取消、超时和大小限制。 */
 export async function fetchMediaBlob(
   url: string,
-  { signal, onProgress }: DownloadOptions,
+  { signal, onProgress, totalTimeoutMs = 120000 }: DownloadOptions,
   kind: 'video' | 'image' = 'video',
   maxBytes = MAX_BUFFER_BYTES,
 ): Promise<Blob> {
@@ -19,9 +21,18 @@ export async function fetchMediaBlob(
   let idleTimer: ReturnType<typeof setTimeout> | undefined
   const resetIdleTimer = (milliseconds: number) => {
     clearTimeout(idleTimer)
-    idleTimer = setTimeout(() => controller.abort(new Error('直链响应超时')), milliseconds)
+    idleTimer = setTimeout(
+      () => controller.abort(new MediaDownloadError('TIMEOUT', '下载响应超时，请重试')),
+      milliseconds,
+    )
   }
-  const totalTimer = setTimeout(() => controller.abort(new Error('直链下载超时')), 120000)
+  const totalTimer =
+    totalTimeoutMs > 0
+      ? setTimeout(
+          () => controller.abort(new MediaDownloadError('TIMEOUT', '下载超时，请重试')),
+          totalTimeoutMs,
+        )
+      : undefined
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   try {
     resetIdleTimer(8000)
@@ -31,18 +42,20 @@ export async function fetchMediaBlob(
       referrerPolicy: 'no-referrer',
       signal: controller.signal,
     })
-    if (!response.ok || !response.body) throw new Error('直链暂不可用')
+    if (!response.ok) throw responseDownloadError(response.status)
+    if (!response.body) throw new MediaDownloadError('INVALID_MEDIA', '媒体内容为空')
     const contentType = response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase()
     if (
       contentType &&
       !contentType.startsWith(kind + '/') &&
       contentType !== 'application/octet-stream'
     ) {
-      throw new Error('链接没有返回预期的媒体文件')
+      throw new MediaDownloadError('INVALID_MEDIA', '链接没有返回预期的媒体文件，请重新解析')
     }
     const length = Number(response.headers.get('Content-Length'))
     const total = Number.isFinite(length) && length > 0 ? length : undefined
-    if (total && total > maxBytes) throw new Error('文件超出下载大小限制')
+    if (total && total > maxBytes)
+      throw new MediaDownloadError('TOO_LARGE', '文件超过当前打包上限，请逐项下载')
     reader = response.body.getReader()
     const chunks: BlobPart[] = []
     let received = 0
@@ -52,13 +65,19 @@ export async function fetchMediaBlob(
       controller.signal.throwIfAborted()
       if (done) break
       received += value.byteLength
-      if (received > maxBytes) throw new Error('文件超出下载大小限制')
+      if (received > maxBytes)
+        throw new MediaDownloadError('TOO_LARGE', '文件超过当前打包上限，请逐项下载')
       chunks.push(new Uint8Array(value).buffer)
       onProgress(received, total)
     }
-    if (!received) throw new Error('媒体内容为空')
+    if (!received) throw new MediaDownloadError('INVALID_MEDIA', '媒体内容为空，请重新解析')
     signal.throwIfAborted()
     return new Blob(chunks, { type: contentType || 'application/octet-stream' })
+  } catch (error) {
+    signal.throwIfAborted()
+    if (controller.signal.aborted) throw controller.signal.reason
+    if (error instanceof MediaDownloadError) throw error
+    throw new MediaDownloadError('NETWORK', '下载连接中断，请检查网络后重试')
   } finally {
     clearTimeout(idleTimer)
     clearTimeout(totalTimer)
