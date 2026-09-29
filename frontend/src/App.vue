@@ -202,10 +202,10 @@ function platformName(platform: VideoInfo['platform']) {
           >
             {{
               livePhotoCount > 0
-                ? '优先下载全部动态视频'
+                ? '打包下载全部（动态优先）'
                 : video.images?.every((asset) => asset.watermarkFree)
-                  ? '下载全部无水印原图'
-                  : '下载全部高清原图'
+                  ? '打包下载全部无水印原图'
+                  : '打包下载全部高清原图'
             }}
           </button>
           <button
@@ -215,7 +215,7 @@ function platformName(platform: VideoInfo['platform']) {
             :disabled="batchDownloading"
             @click="handleDownloadAllOriginals"
           >
-            下载全部原图
+            打包下载全部原图
           </button>
           <button
             v-if="video.mediaType === 'video' && video.videoUrl"
@@ -250,6 +250,9 @@ function platformName(platform: VideoInfo['platform']) {
           >
         </div>
 
+        <p v-if="video.mediaType === 'image'" class="download-tip">
+          批量下载保存为 ZIP，解压后查看视频和图片；总大小限 64 MB，超出请逐项下载。
+        </p>
         <p v-if="video.mediaType === 'image' && batchProgress" class="download-tip" role="status">
           {{ batchProgress }}
         </p>

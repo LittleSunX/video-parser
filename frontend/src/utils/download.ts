@@ -58,14 +58,18 @@ export function openDirectDownload(url: string): void {
   anchor.remove()
 }
 
-export function triggerDownload(url: string, filename: string): void {
-  const downloadUrl =
+export function buildDownloadUrl(url: string, filename: string): string {
+  return (
     apiBaseUrl +
     '/api/download?url=' +
     encodeURIComponent(url) +
     '&filename=' +
     encodeURIComponent(filename)
+  )
+}
 
+export function triggerDownload(url: string, filename: string): void {
+  const downloadUrl = buildDownloadUrl(url, filename)
   const anchor = document.createElement('a')
   anchor.href = downloadUrl
   anchor.download = filename
