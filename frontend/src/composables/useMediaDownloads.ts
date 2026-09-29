@@ -1,3 +1,4 @@
+import { downloadMediaArchive } from '../utils/batch-download'
 import { ref, onScopeDispose, type Ref } from 'vue'
 import type { VideoInfo } from '../types/video'
 import { downloadDirectVideo } from '../utils/auto-download'
@@ -148,15 +149,19 @@ export function useMediaDownloads(
     batchController = controller
     batchDownloading.value = true
     try {
-      for (let index = 0; index < jobs.length; index += 1) {
-        if (controller.signal.aborted) return
-        triggerDownload(jobs[index].url, jobs[index].filename)
-        batchProgress.value = '已发起 ' + (index + 1) + ' / ' + jobs.length + ' 个下载请求'
-        if (index < jobs.length - 1) await delay(300)
-      }
-      showNotice('已发起全部下载，请在浏览器下载列表中查看；如有提示，请允许多个文件下载')
-    } catch {
-      showNotice('批量下载中断，请检查浏览器下载列表后重试')
+      await downloadMediaArchive(
+        jobs,
+        `抖音_${current.videoId}_${preferLive ? '动态优先' : '原图'}.zip`,
+        controller.signal,
+        (message) => {
+          if (batchController === controller) batchProgress.value = message
+        },
+      )
+      showNotice('已请求浏览器保存 ZIP，解压后可查看全部文件', 6000)
+    } catch (error) {
+      if (controller.signal.aborted) return
+      batchProgress.value = error instanceof Error ? error.message : '批量下载失败，请重试'
+      showNotice(batchProgress.value, 6000)
     } finally {
       if (batchController === controller) {
         batchController = undefined
@@ -170,10 +175,6 @@ export function useMediaDownloads(
     if (!current?.musicUrl) return
     triggerDownload(current.musicUrl, buildMusicFilename(current))
     showNotice('已发起背景音乐下载')
-  }
-
-  function delay(milliseconds: number) {
-    return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds))
   }
 
   onScopeDispose(() => {

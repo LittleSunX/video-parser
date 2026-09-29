@@ -5,12 +5,13 @@ interface DownloadOptions {
   onProgress: (received: number, total?: number) => void
 }
 
-/** 直接从媒体 CDN 读取；成功后用同源 Blob URL 请求浏览器保存。 */
-export async function downloadDirectVideo(
+/** 受限读取媒体内容，支持取消、超时和大小限制。 */
+export async function fetchMediaBlob(
   url: string,
-  filename: string,
   { signal, onProgress }: DownloadOptions,
-): Promise<void> {
+  kind: 'video' | 'image' = 'video',
+  maxBytes = MAX_BUFFER_BYTES,
+): Promise<Blob> {
   const controller = new AbortController()
   const cancel = () => controller.abort(signal.reason)
   signal.throwIfAborted()
@@ -34,14 +35,14 @@ export async function downloadDirectVideo(
     const contentType = response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase()
     if (
       contentType &&
-      !contentType.startsWith('video/') &&
+      !contentType.startsWith(kind + '/') &&
       contentType !== 'application/octet-stream'
     ) {
-      throw new Error('直链没有返回视频文件')
+      throw new Error('链接没有返回预期的媒体文件')
     }
     const length = Number(response.headers.get('Content-Length'))
     const total = Number.isFinite(length) && length > 0 ? length : undefined
-    if (total && total > MAX_BUFFER_BYTES) throw new Error('大文件使用浏览器下载')
+    if (total && total > maxBytes) throw new Error('文件超出下载大小限制')
     reader = response.body.getReader()
     const chunks: BlobPart[] = []
     let received = 0
@@ -51,24 +52,13 @@ export async function downloadDirectVideo(
       controller.signal.throwIfAborted()
       if (done) break
       received += value.byteLength
-      if (received > MAX_BUFFER_BYTES) throw new Error('大文件使用浏览器下载')
+      if (received > maxBytes) throw new Error('文件超出下载大小限制')
       chunks.push(new Uint8Array(value).buffer)
       onProgress(received, total)
     }
-    if (!received) throw new Error('视频内容为空')
+    if (!received) throw new Error('媒体内容为空')
     signal.throwIfAborted()
-    const blobUrl = URL.createObjectURL(new Blob(chunks, { type: contentType || 'video/mp4' }))
-    const anchor = document.createElement('a')
-    anchor.href = blobUrl
-    anchor.download = filename
-    try {
-      document.body.appendChild(anchor)
-      anchor.click()
-    } finally {
-      anchor.remove()
-      // 给移动端下载管理器留出接管 Blob 的时间。
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
-    }
+    return new Blob(chunks, { type: contentType || 'application/octet-stream' })
   } finally {
     clearTimeout(idleTimer)
     clearTimeout(totalTimer)
@@ -82,5 +72,30 @@ export async function downloadDirectVideo(
       }
       reader.releaseLock()
     }
+  }
+}
+
+export async function downloadDirectVideo(
+  url: string,
+  filename: string,
+  options: DownloadOptions,
+): Promise<void> {
+  const blob = await fetchMediaBlob(url, options)
+  options.signal.throwIfAborted()
+  saveBlob(blob, filename)
+}
+
+export function saveBlob(blob: Blob, filename: string): void {
+  const blobUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = blobUrl
+  anchor.download = filename
+  try {
+    document.body.appendChild(anchor)
+    anchor.click()
+  } finally {
+    anchor.remove()
+    // 给移动端下载管理器留出接管 Blob 的时间。
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
   }
 }
