@@ -15,6 +15,14 @@ const {
   handleClear,
   batchDownloading,
   batchProgress,
+  batchItems,
+  batchCanRetry,
+  batchHasCache,
+  batchPart,
+  batchCanContinue,
+  saveBatchPart,
+  continueBatchDownload,
+  retryBatchDownload,
   videoDownloading,
   downloadStatus,
   downloadState,
@@ -122,7 +130,7 @@ function platformName(platform: VideoInfo['platform']) {
               v-if="asset.livePhotoUrl"
               type="button"
               class="image-download-button primary-image-action"
-              :disabled="batchDownloading"
+              :disabled="batchDownloading || !!batchPart || batchCanContinue"
               @click="handleDownloadLivePhoto(index)"
             >
               下载动态视频
@@ -131,7 +139,7 @@ function platformName(platform: VideoInfo['platform']) {
               v-if="asset.url"
               type="button"
               class="image-download-button"
-              :disabled="batchDownloading"
+              :disabled="batchDownloading || !!batchPart || batchCanContinue"
               @click="handleDownloadImage(index)"
             >
               {{ asset.watermarkFree ? '下载无水印原图' : '下载高清原图' }}
@@ -197,7 +205,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'image' && video.images?.length"
             class="download-button"
             type="button"
-            :disabled="batchDownloading"
+            :disabled="batchDownloading || !!batchPart || batchCanContinue"
             @click="handleDownloadAllPreferred"
           >
             {{
@@ -212,7 +220,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'image' && livePhotoCount > 0"
             class="secondary-button"
             type="button"
-            :disabled="batchDownloading"
+            :disabled="batchDownloading || !!batchPart || batchCanContinue"
             @click="handleDownloadAllOriginals"
           >
             打包下载全部原图
@@ -251,21 +259,57 @@ function platformName(platform: VideoInfo['platform']) {
         </div>
 
         <p v-if="video.mediaType === 'image'" class="download-tip">
-          批量下载保存为 ZIP，解压后查看视频和图片；总大小限 64 MB，超出请逐项下载。
+          批量下载保存为 ZIP，每包媒体内容最多 128 MB，超出会分包保存；单个文件超过 128 MB
+          请逐项下载。
         </p>
         <p v-if="video.mediaType === 'image' && batchProgress" class="download-tip" role="status">
           {{ batchProgress }}
         </p>
+        <button v-if="batchPart" class="download-button" type="button" @click="saveBatchPart">
+          保存第 {{ batchPart.number }} 包（{{ batchPart.count }} 项，{{
+            (batchPart.size / 1024 / 1024).toFixed(1)
+          }}
+          MB）
+        </button>
+        <button
+          v-if="batchCanContinue"
+          class="secondary-button"
+          type="button"
+          @click="continueBatchDownload"
+        >
+          继续准备下一包
+        </button>
+        <ol v-if="batchItems.length" class="download-tip" aria-label="批量文件状态">
+          <li v-for="(item, index) in batchItems" :key="item.filename">
+            第 {{ index + 1 }} 项：{{ item.message }}
+          </li>
+        </ol>
+        <button
+          v-if="batchCanRetry && !batchDownloading"
+          class="secondary-button"
+          type="button"
+          @click="retryBatchDownload"
+        >
+          重试未完成项
+        </button>
+        <button
+          v-if="(batchHasCache || batchCanContinue) && !batchDownloading"
+          class="text-button"
+          type="button"
+          @click="stopBatchDownload"
+        >
+          结束批量任务并释放缓存
+        </button>
         <button
           v-if="batchDownloading"
           class="text-button"
           type="button"
           @click="stopBatchDownload"
         >
-          停止发起后续下载
+          取消下载并释放缓存
         </button>
         <p v-if="video.mediaType === 'image'" class="download-tip">
-          批量下载需要浏览器允许多个文件下载；实际保存状态请查看浏览器下载列表。
+          小作品自动保存一包；大作品请逐包点击保存，再继续下一包。中途失败可重试未完成项，实际保存状态请查看浏览器下载列表。
         </p>
         <div
           v-if="video.mediaType === 'video' && downloadStatus"
