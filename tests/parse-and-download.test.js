@@ -56,6 +56,43 @@ test('ordinary clean photo returns after the first successful strategy', async (
   assert.equal(calls, 1)
 })
 
+test('three complete live tracks still seek clean images from fallback', async () => {
+  let calls = 0
+  global.fetch = async () => {
+    calls++
+    return itemResponse(
+      [1, 2, 3].map((index) => ({
+        ...(calls === 1
+          ? { url_list: ['https://p.douyinpic.com/' + index + '.jpg'] }
+          : { watermark_free_download_url_list: ['https://p.douyinpic.com/' + index + '.jpg'] }),
+        video: { play_addr: { uri: 'live-' + index } },
+      })),
+    )
+  }
+  const result = await new DouyinParser().parse(url)
+  assert.equal(calls, 2)
+  assert.equal(result.images.length, 3)
+  assert.equal(
+    result.images.every((image) => image.livePhotoUrl && image.watermarkFree),
+    true,
+  )
+})
+
+test('a complete live entry does not hide an unparsed entry', async () => {
+  let calls = 0
+  global.fetch = async () => {
+    calls++
+    const live = (index) => ({
+      watermark_free_download_url_list: ['https://p.douyinpic.com/' + index + '.jpg'],
+      video: { play_addr: { uri: 'live-' + index } },
+    })
+    return itemResponse([live(1), calls === 1 ? {} : live(2)])
+  }
+  const result = await new DouyinParser().parse(url)
+  assert.equal(calls, 2)
+  assert.equal(result.images.length, 2)
+})
+
 test('known but missing live track continues fallback', async () => {
   let calls = 0
   global.fetch = async () => {

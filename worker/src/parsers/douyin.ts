@@ -6,7 +6,7 @@ import type { ParsedMediaResult } from './douyin/types'
 import { mapItemToVideoInfo } from './douyin/map-item'
 import { findMediaItem, findFilterReason } from './douyin/items'
 import { extractRouterData, pageMatchesExpectedVideo, extractMeta } from './douyin/page'
-import { scoreImageResult, isHighConfidenceImageResult } from './douyin/images'
+import { runParseStrategies } from './douyin/strategies'
 import { normalizeText, normalizeUrl } from './douyin/text'
 
 export class DouyinParser implements VideoParser {
@@ -35,65 +35,27 @@ export class DouyinParser implements VideoParser {
     const strategies = [
       {
         name: 'web-detail',
-        run: () => this.parseFromWebDetail(videoId, sourceUrl, signal),
+        run: (strategySignal: AbortSignal) =>
+          this.parseFromWebDetail(videoId, sourceUrl, strategySignal),
       },
       {
         name: 'mobile-feed',
-        run: () => this.parseFromMobileFeed(videoId, sourceUrl, signal),
+        run: (strategySignal: AbortSignal) =>
+          this.parseFromMobileFeed(videoId, sourceUrl, strategySignal),
       },
       {
         name: 'mobile-ssr',
-        run: () => this.parseFromMobileSsr(videoId, sourceUrl, signal),
+        run: (strategySignal: AbortSignal) =>
+          this.parseFromMobileSsr(videoId, sourceUrl, strategySignal),
       },
       {
         name: 'page-meta',
-        run: () => this.parseFromCurrentPage(sourceUrl, videoId, signal),
+        run: (strategySignal: AbortSignal) =>
+          this.parseFromCurrentPage(sourceUrl, videoId, strategySignal),
       },
     ]
 
-    const failures: string[] = []
-    let bestImageResult: VideoInfo | undefined
-    let bestImageScore = -1
-
-    for (const strategy of strategies) {
-      try {
-        signal?.throwIfAborted()
-        const result = await strategy.run()
-        const video = result.video
-
-        if (video.videoUrl) {
-          return video
-        }
-
-        if ((video.images?.length ?? 0) > 0) {
-          const score = scoreImageResult(video)
-
-          if (score > bestImageScore) {
-            bestImageResult = video
-            bestImageScore = score
-          }
-
-          // 普通图文拿到完整原图即可返回；已发现实况字段但缺少动态轨时继续兜底。
-          if (isHighConfidenceImageResult(result)) {
-            return video
-          }
-        }
-      } catch (error) {
-        if (signal?.aborted) {
-          if (bestImageResult && signal.reason?.name === 'TimeoutError') return bestImageResult
-          signal.throwIfAborted()
-        }
-        const message = error instanceof Error ? error.message : String(error)
-        failures.push(strategy.name + ': ' + message)
-        console.warn('[DouyinParser] strategy failed:', strategy.name, message)
-      }
-    }
-
-    if (bestImageResult) {
-      return bestImageResult
-    }
-
-    throw new AppError('VIDEO_RESOURCE_NOT_FOUND', '视频资源解析失败：' + failures.join(' | '), 422)
+    return runParseStrategies(strategies, signal)
   }
 
   private async parseFromWebDetail(
