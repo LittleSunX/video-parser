@@ -36,7 +36,14 @@ export async function readParseInput(request: Request): Promise<string> {
   } catch {
     throw new AppError('INVALID_INPUT', '请求内容格式不正确，请重新提交分享链接')
   }
-  if (!body || typeof body !== 'object' || Array.isArray(body) || !('url' in body) || typeof body.url !== 'string' || !body.url.trim()) {
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    Array.isArray(body) ||
+    !('url' in body) ||
+    typeof body.url !== 'string' ||
+    !body.url.trim()
+  ) {
     throw new AppError('INVALID_INPUT', '请输入有效的作品分享链接或分享文案')
   }
   if (body.url.length > 5000) {

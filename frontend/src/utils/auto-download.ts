@@ -32,7 +32,11 @@ export async function downloadDirectVideo(
     })
     if (!response.ok || !response.body) throw new Error('直链暂不可用')
     const contentType = response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase()
-    if (contentType && !contentType.startsWith('video/') && contentType !== 'application/octet-stream') {
+    if (
+      contentType &&
+      !contentType.startsWith('video/') &&
+      contentType !== 'application/octet-stream'
+    ) {
       throw new Error('直链没有返回视频文件')
     }
     const length = Number(response.headers.get('Content-Length'))
@@ -71,7 +75,11 @@ export async function downloadDirectVideo(
     signal.removeEventListener('abort', cancel)
     controller.abort()
     if (reader) {
-      try { await reader.cancel() } catch { /* 请求已中止。 */ }
+      try {
+        await reader.cancel()
+      } catch {
+        /* 请求已中止。 */
+      }
       reader.releaseLock()
     }
   }

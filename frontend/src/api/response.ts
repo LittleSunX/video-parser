@@ -13,7 +13,10 @@ function httpMessage(response: Response): string {
   return '解析服务返回异常，请刷新页面后重试'
 }
 
-export async function readVideoResponse(response: Response, signal?: AbortSignal): Promise<VideoInfo> {
+export async function readVideoResponse(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<VideoInfo> {
   let payload: unknown
   try {
     payload = await response.json()
@@ -26,17 +29,27 @@ export async function readVideoResponse(response: Response, signal?: AbortSignal
   const result = payload as Record<string, unknown>
   if (result.success === false && result.error && typeof result.error === 'object') {
     const message = (result.error as Record<string, unknown>).message
-    if (typeof message === 'string' && message.trim() && message.length <= 300) throw new Error(message)
+    if (typeof message === 'string' && message.trim() && message.length <= 300)
+      throw new Error(message)
   }
   if (!response.ok || result.success !== true || !result.data || typeof result.data !== 'object') {
     throw new Error(httpMessage(response))
   }
   const data = result.data as Record<string, unknown>
-  if (typeof data.videoId !== 'string' || typeof data.title !== 'string' || typeof data.sourceUrl !== 'string' ||
-      typeof data.platform !== 'string' || !['douyin', 'kuaishou', 'xiaohongshu', 'tiktok', 'unknown'].includes(data.platform) ||
-      (data.mediaType !== 'video' && data.mediaType !== 'image') ||
-      (data.mediaType === 'video' && typeof data.videoUrl !== 'string') ||
-      (data.mediaType === 'image' && (!Array.isArray(data.images) || !data.images.every((image) => image && typeof image === 'object' && typeof image.url === 'string')))) {
+  if (
+    typeof data.videoId !== 'string' ||
+    typeof data.title !== 'string' ||
+    typeof data.sourceUrl !== 'string' ||
+    typeof data.platform !== 'string' ||
+    !['douyin', 'kuaishou', 'xiaohongshu', 'tiktok', 'unknown'].includes(data.platform) ||
+    (data.mediaType !== 'video' && data.mediaType !== 'image') ||
+    (data.mediaType === 'video' && typeof data.videoUrl !== 'string') ||
+    (data.mediaType === 'image' &&
+      (!Array.isArray(data.images) ||
+        !data.images.every(
+          (image) => image && typeof image === 'object' && typeof image.url === 'string',
+        )))
+  ) {
     throw new Error('作品信息不完整，请重新解析')
   }
   return data as unknown as VideoInfo
