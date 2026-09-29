@@ -86,10 +86,12 @@ async function handleDownload(request: Request, requestUrl: URL, env: Env): Prom
     if (acceptRanges) headers.set('Accept-Ranges', acceptRanges)
 
     headers.set('Access-Control-Allow-Origin', '*')
-    headers.set(
-      'Content-Disposition',
-      'attachment; filename="download"; filename*=UTF-8\'\'' + encodeURIComponent(filename),
-    )
+    headers.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length')
+    if (upstream.status !== 416)
+      headers.set(
+        'Content-Disposition',
+        'attachment; filename="download"; filename*=UTF-8\'\'' + encodeURIComponent(filename),
+      )
     headers.set('Cache-Control', 'private, max-age=0, no-store')
 
     return new Response(upstream.body, {

@@ -199,3 +199,38 @@ test('network failure after the first chunk errors the stream and clears timers'
   expect(signal.aborted).toBe(true)
   expect(vi.getTimerCount()).toBe(0)
 })
+
+test.each([false, true])(
+  'range 416 preserves resource length and releases upstream (body=%s)',
+  async (withBody) => {
+    vi.useFakeTimers()
+    const cancel = vi.fn()
+    let signal
+    global.fetch = async (_url, options) => {
+      expect(options.headers.Range).toBe('bytes=100-')
+      signal = options.signal
+      return new Response(withBody ? new ReadableStream({ cancel }) : null, {
+        status: 416,
+        headers: {
+          'Content-Range': 'bytes */100',
+          'Accept-Ranges': 'bytes',
+          'Content-Type': 'text/html',
+          'Content-Length': '999',
+        },
+      })
+    }
+    const input = request()
+    input.headers.set('Range', 'bytes=100-')
+    const response = await worker.fetch(input, env)
+    expect(response.status).toBe(416)
+    expect(response.headers.get('Content-Range')).toBe('bytes */100')
+    expect(response.headers.get('Accept-Ranges')).toBe('bytes')
+    expect(response.headers.get('Access-Control-Expose-Headers')).toContain('Content-Range')
+    expect(response.headers.get('Content-Disposition')).toBeNull()
+    expect(response.headers.get('Content-Length')).toBeNull()
+    expect(await response.text()).toBe('')
+    expect(signal.aborted).toBe(true)
+    expect(cancel).toHaveBeenCalledTimes(withBody ? 1 : 0)
+    expect(vi.getTimerCount()).toBe(0)
+  },
+)

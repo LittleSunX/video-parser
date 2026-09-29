@@ -61,7 +61,12 @@ export function runParseStrategies(
         video.images.filter((image) => image.livePhotoUrl).length,
       )
       const score = scoreImageResult(video)
-      if (score > bestScore) {
+      const bestCount = bestImage?.images?.length ?? 0
+      // 先保留更多资源；数量相同时再比较动态轨和图片质量。
+      if (
+        video.images.length > bestCount ||
+        (video.images.length === bestCount && score > bestScore)
+      ) {
         bestImage = video
         bestScore = score
       }
@@ -69,7 +74,7 @@ export function runParseStrategies(
       const keepsKnownResources =
         video.images.length >= knownImageCount &&
         video.images.filter((image) => image.livePhotoUrl).length >= knownLiveCount
-      if (isHighConfidenceImageResult(result) && score >= bestScore && keepsKnownResources)
+      if (isHighConfidenceImageResult(result) && bestImage === video && keepsKnownResources)
         finish(video)
     }
 
