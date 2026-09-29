@@ -16,7 +16,7 @@
 <p>
   <img src="https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white" alt="Vue 3" />
   <img src="https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white" alt="Vite" />
-  <img src="https://img.shields.io/badge/TypeScript-7-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white" alt="Cloudflare Workers" />
   <img src="https://img.shields.io/badge/Vercel-Frontend-000000?logo=vercel&logoColor=white" alt="Vercel" />
 </p>
@@ -27,16 +27,16 @@
 
 ## ✨ 项目亮点
 
-| 能力 | 说明 |
-| --- | --- |
-| 🎞️ **视频解析** | 解析公开抖音作品，自动选择更高质量的视频流 |
-| 🖼️ **图文解析** | 支持普通图集、Slides、高清图片资源 |
-| 🌄 **Live Photo** | 识别实况动态轨，可分别下载静态图与 MP4 |
-| 🎵 **背景音乐** | 上游返回音乐资源时可单独下载 |
-| ⚡ **双通道下载** | 优先浏览器直链下载，失败后自动切换 Worker 代理 |
-| 🏷️ **友好文件名** | 自动生成“平台_作者_标题_作品ID”格式文件名 |
-| 🛡️ **接口保护** | HTTPS 校验、媒体域名白名单、请求大小限制、Cloudflare 限流 |
-| 📱 **响应式页面** | PC 和手机均可使用，支持下载进度、取消、批量下载 |
+| 能力              | 说明                                                      |
+| ----------------- | --------------------------------------------------------- |
+| 🎞️ **视频解析**   | 解析公开抖音作品，自动选择更高质量的视频流                |
+| 🖼️ **图文解析**   | 支持普通图集、Slides、高清图片资源                        |
+| 🌄 **Live Photo** | 识别实况动态轨，可分别下载静态图与 MP4                    |
+| 🎵 **背景音乐**   | 上游返回音乐资源时可单独下载                              |
+| ⚡ **双通道下载** | 优先浏览器直链下载，失败后自动切换 Worker 代理            |
+| 🏷️ **友好文件名** | 自动生成“平台_作者_标题_作品ID”格式文件名                 |
+| 🛡️ **接口保护**   | HTTPS 校验、媒体域名白名单、请求大小限制、Cloudflare 限流 |
+| 📱 **响应式页面** | PC 和手机均可使用，支持下载进度、取消、批量下载           |
 
 > 当前正式支持 **抖音**。快手、小红书、TikTok 等平台已预留 Parser 扩展结构，但暂未开放。
 
@@ -62,15 +62,15 @@ https://api.wind-video.ccwu.cc/api/health
 
 ## 📦 支持内容
 
-| 内容类型 | 解析 | 下载 | 备注 |
-| :--- | :---: | :---: | --- |
-| 普通视频 | ✅ | ✅ | 自动选择较高画质流 |
-| 视频封面 | ✅ | ✅ | 支持独立下载 |
-| 普通图集 | ✅ | ✅ | 支持单张 / 批量下载 |
-| 无水印原图 | ✅ | ✅ | 仅明确命中可信无水印字段时标记 |
-| Live Photo | ✅ | ✅ | 静态图 + MP4 动态轨 |
-| 背景音乐 | ✅ | ✅ | 视作品返回数据而定 |
-| 私密 / 权限作品 | ❌ | ❌ | 不绕过平台访问控制 |
+| 内容类型        | 解析 | 下载 | 备注                           |
+| :-------------- | :--: | :--: | ------------------------------ |
+| 普通视频        |  ✅  |  ✅  | 自动选择较高画质流             |
+| 视频封面        |  ✅  |  ✅  | 支持独立下载                   |
+| 普通图集        |  ✅  |  ✅  | 支持单张 / 批量下载            |
+| 无水印原图      |  ✅  |  ✅  | 仅明确命中可信无水印字段时标记 |
+| Live Photo      |  ✅  |  ✅  | 静态图 + MP4 动态轨            |
+| 背景音乐        |  ✅  |  ✅  | 视作品返回数据而定             |
+| 私密 / 权限作品 |  ❌  |  ❌  | 不绕过平台访问控制             |
 
 ---
 
@@ -79,7 +79,7 @@ https://api.wind-video.ccwu.cc/api/health
 ### 环境要求
 
 ```text
-Node.js >= 22.12.0
+Node.js 22.13+（建议使用 .nvmrc 对应的 Node 22 LTS）
 ```
 
 ### 安装依赖
@@ -266,7 +266,7 @@ flowchart TB
 ### 工程
 
 - npm workspaces
-- Node.js Test Runner
+- Vitest 回归测试
 - Wrangler
 
 ---
@@ -365,9 +365,9 @@ GET /api/health
 
 当前 Worker 使用 Cloudflare 原生 Rate Limiting：
 
-| 接口 | 限制 |
-| --- | --- |
-| `POST /api/parse` | 60 秒 10 次 |
+| 接口                | 限制         |
+| ------------------- | ------------ |
+| `POST /api/parse`   | 60 秒 10 次  |
 | `GET /api/download` | 60 秒 120 次 |
 
 其他保护：
@@ -394,7 +394,7 @@ GET /api/health
 # API / 下载保护逻辑
 npm test
 
-# 前端 TypeScript 检查
+# 前端 Vue 脚本和模板类型检查
 npm run check:frontend
 
 # 前端构建 + Worker typecheck
@@ -468,12 +468,12 @@ https://api.example.com
 
 推荐配置：
 
-| 配置项 | 值 |
-| --- | --- |
-| Root Directory | `frontend` |
-| Framework Preset | `Vite` |
-| Build Command | `npm run build` |
-| Output Directory | `dist` |
+| 配置项           | 值              |
+| ---------------- | --------------- |
+| Root Directory   | `frontend`      |
+| Framework Preset | `Vite`          |
+| Build Command    | `npm run build` |
+| Output Directory | `dist`          |
 
 环境变量：
 
@@ -512,7 +512,7 @@ video-parser/
 │  ├─ package.json
 │  └─ wrangler.jsonc
 │
-├─ scripts/
+├─ shared/
 ├─ tests/
 ├─ package.json
 └─ README.md
@@ -572,3 +572,25 @@ video-parser/
 **[在线体验](https://wind-video.ccwu.cc/)** · **[API 状态](https://api.wind-video.ccwu.cc/api/health)**
 
 </div>
+
+## 开发质量检查
+
+```bash
+npm ci
+npm run check
+```
+
+`check` 依次执行 Prettier 格式检查、ESLint、Vitest 回归测试、Vue 模板/脚本类型检查、前端构建及 Worker 类型检查。提交前可运行 `npm run format` 修正格式。仓库通过 `.gitattributes` 和 `.editorconfig` 统一使用 LF，避免 Windows/WSL 换行差异。
+
+前端使用 `vue-tsc`，开发期 TypeScript 固定在 5.9 系列以匹配其编译器接口；不再使用临时生成组件脚本的检查方式。回归测试直接使用 Vitest 模块替身和 Vue effect scope，不再手工加载或编译组件。
+
+- `frontend/src/composables/useVideoPage.ts`：解析请求及取消状态。
+- `frontend/src/composables/useMediaDownloads.ts`：视频、图片及批量下载生命周期。
+- `frontend/src/composables/useNotice.ts`：通知及定时器清理。
+- `worker/src/parsers/douyin.ts`：请求策略与兜底顺序。
+- `worker/src/parsers/douyin/`：页面提取、作品匹配、媒体选择和结果映射。
+- `shared/video.ts`：前后端共用 API 类型。图文完整性只在内部策略结果中记录，不改变 API 响应。
+
+GitHub Actions 会在 main 推送和 Pull Request 时，分别在 Windows 与 Linux 上从锁文件安装依赖并执行 `npm run check`。配置不会自动发布前后端。
+
+开发依赖中的 Miniflare 暂时固定使用已修补的 `undici@7.29.1`，通过根目录 `overrides` 管理；上游更新后可复核并移除此覆盖。

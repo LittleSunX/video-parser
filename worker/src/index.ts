@@ -98,11 +98,7 @@ async function handleDownload(request: Request, requestUrl: URL, env: Env): Prom
     }
     if (upstream.status === 429) throw new AppError('UPSTREAM_BUSY', 'Media HTTP 429', 503)
     if (!upstream.ok && upstream.status !== 206) {
-      throw new AppError(
-        'DOWNLOAD_FAILED',
-        '媒体资源下载失败（HTTP ' + upstream.status + '）',
-        502,
-      )
+      throw new AppError('DOWNLOAD_FAILED', '媒体资源下载失败（HTTP ' + upstream.status + '）', 502)
     }
 
     const headers = new Headers()
@@ -119,7 +115,7 @@ async function handleDownload(request: Request, requestUrl: URL, env: Env): Prom
     headers.set('Access-Control-Allow-Origin', '*')
     headers.set(
       'Content-Disposition',
-      "attachment; filename=\"download\"; filename*=UTF-8''" + encodeURIComponent(filename),
+      'attachment; filename="download"; filename*=UTF-8\'\'' + encodeURIComponent(filename),
     )
     headers.set('Cache-Control', 'private, max-age=0, no-store')
 
@@ -187,7 +183,7 @@ function validateMediaUrl(url: URL): void {
 function sanitizeFilename(value: string): string {
   const cleaned = value
     .replace(/[\u0000-\u001F\u007F]/g, '')
-    .replace(/[\\/:*?\"<>|]/g, '')
+    .replace(/[\\/:*?"<>|]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 180)

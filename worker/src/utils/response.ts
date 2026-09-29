@@ -8,7 +8,11 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
 }
 
-export function jsonResponse<T>(payload: ApiResponse<T>, status = 200, extraHeaders?: Record<string, string>): Response {
+export function jsonResponse<T>(
+  payload: ApiResponse<T>,
+  status = 200,
+  extraHeaders?: Record<string, string>,
+): Response {
   return Response.json(payload, {
     status,
     headers: { ...CORS_HEADERS, ...extraHeaders },

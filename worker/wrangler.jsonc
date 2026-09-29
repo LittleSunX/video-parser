@@ -4,7 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-24",
   "observability": {
-    "enabled": true
+    "enabled": true,
   },
   "ratelimits": [
     {
@@ -12,16 +12,16 @@
       "namespace_id": "1001",
       "simple": {
         "limit": 10,
-        "period": 60
-      }
+        "period": 60,
+      },
     },
     {
       "name": "DOWNLOAD_RATE_LIMITER",
       "namespace_id": "1002",
       "simple": {
         "limit": 120,
-        "period": 60
-      }
-    }
-  ]
+        "period": 60,
+      },
+    },
+  ],
 }

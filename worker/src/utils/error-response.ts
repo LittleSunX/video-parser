@@ -19,12 +19,22 @@ export function errorResponse(error: unknown, operation: 'parse' | 'download'): 
     if (message !== error.message || error.status >= 500) {
       console.warn('API error:', operation, error.code, error.message)
     }
-    return jsonResponse({ success: false, error: { code: error.code, message } }, error.status,
-      error.retryAfter ? { 'Retry-After': String(error.retryAfter) } : undefined)
+    return jsonResponse(
+      { success: false, error: { code: error.code, message } },
+      error.status,
+      error.retryAfter ? { 'Retry-After': String(error.retryAfter) } : undefined,
+    )
   }
   console.error('Unexpected API error:', operation, error)
-  return jsonResponse({ success: false, error: {
-    code: operation === 'parse' ? 'PARSE_FAILED' : 'DOWNLOAD_FAILED',
-    message: operation === 'parse' ? PUBLIC_MESSAGES.PARSE_FAILED : PUBLIC_MESSAGES.DOWNLOAD_FAILED,
-  } }, 500)
+  return jsonResponse(
+    {
+      success: false,
+      error: {
+        code: operation === 'parse' ? 'PARSE_FAILED' : 'DOWNLOAD_FAILED',
+        message:
+          operation === 'parse' ? PUBLIC_MESSAGES.PARSE_FAILED : PUBLIC_MESSAGES.DOWNLOAD_FAILED,
+      },
+    },
+    500,
+  )
 }

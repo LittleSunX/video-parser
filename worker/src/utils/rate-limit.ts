@@ -9,7 +9,11 @@ export interface Env {
   DOWNLOAD_RATE_LIMITER: RateLimiter
 }
 
-export async function enforceRateLimit(request: Request, env: Env, kind: 'parse' | 'download'): Promise<void> {
+export async function enforceRateLimit(
+  request: Request,
+  env: Env,
+  kind: 'parse' | 'download',
+): Promise<void> {
   const limiter = kind === 'parse' ? env?.PARSE_RATE_LIMITER : env?.DOWNLOAD_RATE_LIMITER
   if (!limiter) {
     console.error('Missing rate limit binding:', kind)
@@ -25,8 +29,13 @@ export async function enforceRateLimit(request: Request, env: Env, kind: 'parse'
     throw new AppError('SERVICE_UNAVAILABLE', '服务暂不可用，请稍后重试', 503)
   }
   if (!success) {
-    throw new AppError('RATE_LIMITED', kind === 'parse'
-      ? '解析请求过于频繁，请等待约 60 秒后重试'
-      : '下载请求过于频繁，请等待约 60 秒后重试', 429, 60)
+    throw new AppError(
+      'RATE_LIMITED',
+      kind === 'parse'
+        ? '解析请求过于频繁，请等待约 60 秒后重试'
+        : '下载请求过于频繁，请等待约 60 秒后重试',
+      429,
+      60,
+    )
   }
 }

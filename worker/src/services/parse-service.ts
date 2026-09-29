@@ -5,8 +5,13 @@ import { extractUrl, resolveSupportedUrl, validateSupportedUrl } from '../utils/
 
 export async function parseVideo(input: string, clientSignal?: AbortSignal): Promise<VideoInfo> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(new DOMException('解析超时', 'TimeoutError')), 30000)
-  const signal = clientSignal ? AbortSignal.any([clientSignal, controller.signal]) : controller.signal
+  const timer = setTimeout(
+    () => controller.abort(new DOMException('解析超时', 'TimeoutError')),
+    30000,
+  )
+  const signal = clientSignal
+    ? AbortSignal.any([clientSignal, controller.signal])
+    : controller.signal
   try {
     const result = await parseWithSignal(input, signal)
     clientSignal?.throwIfAborted()

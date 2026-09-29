@@ -84,14 +84,18 @@ function buildFilename(video: VideoInfo, extension: string, suffix?: string): st
     suffix,
   ].filter(Boolean)
 
-  const basename = parts.join('_').slice(0, 150).replace(/[. ]+$/g, '') || video.videoId
+  const basename =
+    parts
+      .join('_')
+      .slice(0, 150)
+      .replace(/[. ]+$/g, '') || video.videoId
 
   return basename + '.' + extension
 }
 
 function sanitizeFilePart(value: string): string {
   return value
-    .replace(/[<>:\"/\\|?*\u0000-\u001F]/g, '')
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/[. ]+$/g, '')

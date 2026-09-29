@@ -63,7 +63,9 @@ export async function resolveSupportedUrl(inputUrl: URL, signal?: AbortSignal): 
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'zh-CN,zh;q=0.9',
         },
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
+          : AbortSignal.timeout(8000),
       })
     } catch {
       signal?.throwIfAborted()
