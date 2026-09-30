@@ -1,3 +1,5 @@
+import { createDiagnostics, mediaCounts, withDiagnostics } from './utils/diagnostics'
+import type { Diagnostics } from './utils/diagnostics'
 import { imageFilename } from '../../shared/media'
 import { fetchMedia } from './services/media-download'
 import { AppError } from './errors/app-error'
@@ -10,39 +12,57 @@ import { errorResponse } from './utils/error-response'
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method === 'OPTIONS') {
-      return optionsResponse()
-    }
-
-    const url = new URL(request.url)
-
-    if (request.method === 'GET' && url.pathname === '/api/health') {
-      return jsonResponse({
-        success: true,
-        data: {
-          service: 'video-parser-api',
-          status: 'ok',
-        },
-      })
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/download') {
-      return handleDownload(request, url, env)
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/parse') {
-      return handleParse(request, env)
-    }
-
-    return notFoundResponse()
+    const trace = createDiagnostics(env?.CF_VERSION_METADATA)
+    const started = Date.now()
+    const response = await routeRequest(request, env, trace)
+    const path = new URL(request.url).pathname
+    const operation = path === '/api/parse' ? 'parse' : path === '/api/download' ? 'download' : 'other'
+    trace.emit('request_response', {
+      operation,
+      status: response.status,
+      durationMs: Date.now() - started,
+    })
+    return withDiagnostics(response, trace)
   },
 }
 
-async function handleParse(request: Request, env: Env): Promise<Response> {
+async function routeRequest(request: Request, env: Env, trace: Diagnostics): Promise<Response> {
+  if (request.method === 'OPTIONS') {
+    return optionsResponse()
+  }
+
+  const url = new URL(request.url)
+
+  if (request.method === 'GET' && url.pathname === '/api/health') {
+    return jsonResponse({
+      success: true,
+      data: {
+        service: 'video-parser-api',
+        status: 'ok',
+        version: trace.version,
+        versionTag: env?.CF_VERSION_METADATA?.tag ?? null,
+        versionCreatedAt: env?.CF_VERSION_METADATA?.timestamp ?? null,
+      },
+    })
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/download') {
+    return handleDownload(request, url, env)
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/parse') {
+    return handleParse(request, env, trace)
+  }
+
+  return notFoundResponse()
+}
+
+async function handleParse(request: Request, env: Env, trace: Diagnostics): Promise<Response> {
   try {
     await enforceRateLimit(request, env, 'parse')
     const input = await readParseInput(request)
-    const video = await parseVideo(input, request.signal)
+    const video = await parseVideo(input, request.signal, trace)
+    trace.emit('parse_result', mediaCounts(video))
 
     return jsonResponse({
       success: true,

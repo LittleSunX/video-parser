@@ -1,3 +1,4 @@
+import { errorCode, mediaCounts, type Diagnostics } from '../../utils/diagnostics'
 import { AppError } from '../../errors/app-error'
 import type { VideoInfo } from '../../types/video'
 import type { ParsedMediaResult } from './types'
@@ -12,6 +13,7 @@ interface ParseStrategy {
 export function runParseStrategies(
   strategies: ParseStrategy[],
   signal?: AbortSignal,
+  trace?: Diagnostics,
 ): Promise<VideoInfo> {
   signal?.throwIfAborted()
   return new Promise((resolve, reject) => {
@@ -23,9 +25,18 @@ export function runParseStrategies(
     let settled = false
     let timer: ReturnType<typeof setTimeout> | undefined
 
-    function finish(video?: VideoInfo, error?: unknown) {
+    function finish(
+      video?: VideoInfo,
+      error?: unknown,
+      reason: 'complete' | 'exhausted' | 'timeout' | 'cancelled' = 'complete',
+    ) {
       if (settled) return
       settled = true
+      trace?.emit('parse_selection', {
+        reason,
+        outcome: video ? 'success' : reason === 'cancelled' ? 'cancelled' : 'error',
+        ...(video ? mediaCounts(video) : { code: errorCode(error) }),
+      })
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
       controller.abort()
@@ -34,8 +45,8 @@ export function runParseStrategies(
     }
 
     function onAbort() {
-      if (signal?.reason?.name === 'TimeoutError' && bestImage) finish(bestImage)
-      else finish(undefined, signal?.reason)
+      if (signal?.reason?.name === 'TimeoutError' && bestImage) finish(bestImage, undefined, 'timeout')
+      else finish(undefined, signal?.reason, signal?.reason?.name === 'TimeoutError' ? 'timeout' : 'cancelled')
     }
 
     function schedule() {
@@ -74,15 +85,28 @@ export function runParseStrategies(
       if (settled || active >= 2 || next >= strategies.length) return
       const strategy = strategies[next++]
       active++
+      const started = Date.now()
       void (async () => {
         try {
           const result = await strategy.run(controller.signal)
+          trace?.emit('strategy_complete', {
+            strategy: strategy.name,
+            outcome: settled ? 'cancelled' : 'success',
+            durationMs: Date.now() - started,
+            imagesComplete: result.imagesComplete,
+            ...mediaCounts(result.video),
+          })
           if (!settled) accept(result)
         } catch (error) {
+          trace?.emit('strategy_complete', {
+            strategy: strategy.name,
+            outcome: controller.signal.aborted ? 'cancelled' : 'error',
+            durationMs: Date.now() - started,
+            code: errorCode(error),
+          })
           if (!settled) {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = errorCode(error)
             failures.push(strategy.name + ': ' + message)
-            console.warn('[DouyinParser] strategy failed:', strategy.name, message)
           }
         } finally {
           active--
@@ -96,6 +120,7 @@ export function runParseStrategies(
                   '视频资源解析失败：' + failures.join(' | '),
                   422,
                 ),
+                'exhausted',
               )
           }
         }
@@ -105,6 +130,6 @@ export function runParseStrategies(
 
     signal?.addEventListener('abort', onAbort, { once: true })
     if (strategies.length) launch()
-    else finish(undefined, new AppError('VIDEO_RESOURCE_NOT_FOUND', '没有可用解析策略', 422))
+    else finish(undefined, new AppError('VIDEO_RESOURCE_NOT_FOUND', '没有可用解析策略', 422), 'exhausted')
   })
 }

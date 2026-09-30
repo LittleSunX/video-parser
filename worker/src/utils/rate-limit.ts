@@ -1,3 +1,4 @@
+import type { VersionMetadata } from './diagnostics'
 import { AppError } from '../errors/app-error'
 
 interface RateLimiter {
@@ -5,6 +6,7 @@ interface RateLimiter {
 }
 
 export interface Env {
+  CF_VERSION_METADATA?: VersionMetadata
   PARSE_RATE_LIMITER: RateLimiter
   DOWNLOAD_RATE_LIMITER: RateLimiter
 }
@@ -24,8 +26,8 @@ export async function enforceRateLimit(
   let success: boolean
   try {
     success = (await limiter.limit({ key: 'video-parser:' + kind + ':' + ip })).success
-  } catch (error) {
-    console.error('Rate limiter failed:', kind, error)
+  } catch {
+    console.error('Rate limiter failed:', kind)
     throw new AppError('SERVICE_UNAVAILABLE', '服务暂不可用，请稍后重试', 503)
   }
   if (!success) {
