@@ -132,3 +132,67 @@ test('clean still-only fallback cannot replace the three known dynamic tracks', 
   ])
   expect(result).toBe(original.video)
 })
+
+test('shorter clean result cannot replace a longer known image list at exhaustion', async () => {
+  const full = imageResult(false)
+  full.video.images.forEach((image) => {
+    delete image.livePhotoUrl
+  })
+  const shorter = imageResult()
+  shorter.video.images = shorter.video.images.slice(0, 2)
+  shorter.video.images.forEach((image) => {
+    delete image.livePhotoUrl
+  })
+  const result = await runParseStrategies([
+    { name: 'full', run: async () => full },
+    { name: 'short-clean', run: async () => shorter },
+  ])
+  expect(result).toBe(full.video)
+  expect(result.images).toHaveLength(3)
+})
+
+test('longer result replaces an earlier partial clean list despite its lower quality score', async () => {
+  const partial = imageResult()
+  partial.imagesComplete = false
+  partial.video.images = partial.video.images.slice(0, 2)
+  partial.video.images.forEach((image) => {
+    delete image.livePhotoUrl
+  })
+  const full = imageResult(false)
+  full.video.images.forEach((image) => {
+    delete image.livePhotoUrl
+  })
+  const result = await runParseStrategies([
+    { name: 'partial', run: async () => partial },
+    { name: 'full', run: async () => full },
+  ])
+  expect(result).toBe(full.video)
+})
+
+test('shared timeout returns the longer list after seeing a shorter clean fallback', async () => {
+  const controller = new AbortController()
+  const full = imageResult(false)
+  full.video.images.forEach((image) => {
+    delete image.livePhotoUrl
+  })
+  const shorter = imageResult()
+  shorter.video.images = shorter.video.images.slice(0, 2)
+  shorter.video.images.forEach((image) => {
+    delete image.livePhotoUrl
+  })
+  const result = await runParseStrategies(
+    [
+      { name: 'full', run: async () => full },
+      { name: 'short-clean', run: async () => shorter },
+      {
+        name: 'timeout',
+        run: (signal) => {
+          controller.abort(new DOMException('deadline', 'TimeoutError'))
+          return pending(signal)
+        },
+      },
+    ],
+    controller.signal,
+  )
+  expect(result).toBe(full.video)
+})

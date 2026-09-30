@@ -68,6 +68,18 @@ export async function fetchMedia(
       current = new URL(location, current)
     }
     if (!upstream) throw new AppError('DOWNLOAD_FAILED', '媒体资源重定向次数过多', 502)
+    if (upstream.status === 416) {
+      // 保留范围错误及资源长度，避免下载器把续传边界误判成网关故障。
+      const headers = new Headers()
+      for (const name of ['Content-Range', 'Accept-Ranges']) {
+        const value = upstream.headers.get(name)
+        if (value) headers.set(name, value)
+      }
+      cleanup()
+      controller.abort()
+      void upstream.body?.cancel().catch(() => {})
+      return new Response(null, { status: 416, headers })
+    }
     if ([401, 403, 404, 410].includes(upstream.status)) {
       throw new AppError('MEDIA_UNAVAILABLE', 'Media HTTP ' + upstream.status, 422)
     }
