@@ -79,7 +79,8 @@ https://api.wind-video.ccwu.cc/api/health
 ### 环境要求
 
 ```text
-Node.js 22.13+（建议使用 .nvmrc 对应的 Node 22 LTS）
+Node.js 22.13+（22.x）或 24+，具体范围见 package.json 的 engines
+建议使用 .nvmrc 对应的版本
 ```
 
 ### 安装依赖
@@ -87,7 +88,7 @@ Node.js 22.13+（建议使用 .nvmrc 对应的 Node 22 LTS）
 ```bash
 git clone https://github.com/LittleSunX/video-parser.git
 cd video-parser
-npm install
+npm ci
 ```
 
 ### 启动后端
@@ -141,12 +142,14 @@ flowchart LR
 
 解析器不会盲目使用返回列表中的第一条作品，而是严格校验目标作品 ID，避免误解析到推荐视频。
 
-对于图文作品，会综合不同策略返回的数据，优先选择：
+对于图文作品，会按图片标识或相同资源地址合并不同接口、不同列表中的资源，不按数组下标配对：
 
-- 更完整的图片列表
-- 明确的无水印图片字段
-- Live Photo 动态轨
-- 背景音乐信息
+- 合并重复图片，保留已发现的 Live Photo 动态轨。
+- 同一图片优先保留明确来自可信无水印字段的地址。
+- 采用更完整图片列表的顺序，同时保留其他已识别资源。
+- 只有动态轨、缺少静态图片或已知资源不完整时，继续尝试备用解析策略。
+
+主策略优先执行，等待 600 ms 后可启动备用策略，最多同时运行两个策略。解析达到总时间预算或策略耗尽时，有可用图文资源则返回已有结果，因此无法保证上游缺失的资源一定能补齐。背景音乐在上游提供时随作品返回。
 
 核心解析逻辑位于：
 
@@ -179,7 +182,7 @@ worker/src/parsers/douyin.ts
 浏览器 → Cloudflare Worker → 抖音媒体 CDN
 ```
 
-Worker 会设置 `Content-Disposition`，保证推荐文件名能够正常生效。
+Worker 通过 `Content-Disposition` 提供建议文件名，实际保存名称和操作取决于浏览器。切换备用下载后，请到浏览器下载列表查看进度。
 
 前端直链下载当前限制：
 
@@ -187,6 +190,8 @@ Worker 会设置 `Content-Disposition`，保证推荐文件名能够正常生效
 最大缓冲：64 MiB
 总超时：120 秒
 ```
+
+**64 MiB 是普通视频自动下载时的浏览器缓冲阈值，不是视频最大下载容量。** 超过阈值会转交 Worker 流式代理下载；代理不设置此文件大小上限，但仍受网络、上游和运行环境约束。
 
 同时保留 **打开直链** 和 **备用下载**，方便不同浏览器 / 网络环境下手动选择。
 
@@ -201,11 +206,15 @@ Worker 会设置 `Content-Disposition`，保证推荐文件名能够正常生效
 - 显示逐项状态，失败后只重试未完成项
 - 取消、重新解析或离开页面时释放缓存
 
+“下载全部”采用动态优先模式：每项有实况视频时下载 MP4，否则下载静态图片。“下载全部原图”只收集可用静态图片。例如，包含 3 个实况资源的作品，动态优先包通常含 3 个 MP4，原图包含 3 张图片；不会在同一个操作中自动把两者都收集进去。Live Photo 下载为独立静态图或 MP4，不会自动生成手机相册中的实况照片。
+
 批量下载使用 ZIP 保存，每包媒体内容最多 **128 MiB**（ZIP 元数据会有少量额外开销）。小作品完成后自动请求保存；超过单包容量时，页面提供“保存第 N 包”和“继续准备下一包”，由用户逐包点击，避免浏览器拦截连续下载。单个文件超过 128 MiB 时请使用单项下载入口。
 
 打包以 256 KiB 分块读取 Blob，不再创建整包 Uint8Array。页面每次只准备一个包，失败时保留本包已获取文件；包保存后释放任务引用，再准备下一包。最终 ZIP 和浏览器保存过程仍占用内存，不等于零内存下载。上游不提供文件长度时，跨包边界的未完成文件可能需要在下一包重新获取。
 
-批量媒体获取保留响应及读取超时，不设持续传输的总时长限制。Worker 备用下载等待响应头最多 15 秒（重定向共用），每次读取停滞最多 30 秒；支持取消传递，保留 Range 流式下载。传输开始后的异常会终止响应流，无法再改成 JSON 错误响应。
+批量媒体获取保留响应及读取超时，不设持续传输的总时长限制。Worker 备用下载等待响应头最多 15 秒（重定向共用），每次读取停滞最多 30 秒；支持取消传递，保留 Range 流式下载。上游返回 HTTP 416 时保留范围错误及相关长度信息，供浏览器处理续传边界。传输开始后的异常会终止响应流，无法再改成 JSON 错误响应。
+
+代理根据响应 `Content-Type` 拒绝明确的 HTML、JSON 等非媒体内容，避免将错误页面保存成视频。缺少类型或声明为 `application/octet-stream` 的响应仍可透传；该检查不等于对文件内容做完整识别。
 
 ---
 
@@ -240,6 +249,8 @@ download_url / download_addr
 ```
 
 避免把普通 CDN 地址错误标记成无水印。
+
+单张图片、封面及 ZIP 中的图片，会根据已识别的响应 MIME 修正为 JPG、PNG、WebP 等后缀，不进行图片转码。缺少 MIME、通用二进制类型或未识别的图片类型会保留原建议文件名，不能仅凭后缀判断实际格式。
 
 ---
 
@@ -393,26 +404,32 @@ GET /api/health
 
 ---
 
-## 🧪 测试
+## 🧪 开发与质量检查
+
+提交或部署前，在仓库根目录执行：
 
 ```bash
-# API / 下载保护逻辑
-npm test
-
-# 前端 Vue 脚本和模板类型检查
-npm run check:frontend
-
-# 前端构建 + Worker typecheck
-npm run build
+npm ci
+npm run check
 ```
 
-部署前建议执行：
+需要单独检查时可运行 `npm test`、`npm run lint`、`npm run check:frontend` 或 `npm run build`；完整验证以 `npm run check` 为准。
 
-```bash
-npm test
-npm run check:frontend
-npm run build
-```
+`check` 依次执行 Prettier 格式检查、ESLint、Vitest 回归测试、Vue 模板/脚本类型检查、前端构建及 Worker 类型检查。提交前可运行 `npm run format` 修正格式。仓库通过 `.gitattributes` 和 `.editorconfig` 统一使用 LF，避免 Windows/WSL 换行差异。
+
+前端使用 `vue-tsc`，开发期 TypeScript 固定在 5.9 系列以匹配其编译器接口；不再使用临时生成组件脚本的检查方式。回归测试直接使用 Vitest 模块替身和 Vue effect scope，不再手工加载或编译组件。
+
+- `frontend/src/composables/useVideoPage.ts`：解析请求及取消状态。
+- `frontend/src/composables/useMediaDownloads.ts`：视频、图片及批量下载生命周期。
+- `frontend/src/composables/useNotice.ts`：通知及定时器清理。
+- `worker/src/parsers/douyin.ts`：请求策略与兜底顺序。
+- `worker/src/parsers/douyin/`：页面提取、作品匹配、媒体选择和结果映射。
+- `shared/media.ts`：前后端共用图片 MIME 与下载后缀处理。
+- `shared/video.ts`：前后端共用 API 类型。图文完整性只在内部策略结果中记录，不改变 API 响应。
+
+GitHub Actions 会在 main 推送和 Pull Request 时，分别在 Windows 与 Linux 上从锁文件安装依赖并执行 `npm run check`。配置不会自动发布前后端。
+
+开发依赖中的 Miniflare 暂时固定使用已修补的 `undici@7.29.1`，通过根目录 `overrides` 管理；上游更新后可复核并移除此覆盖。
 
 ---
 
@@ -498,6 +515,7 @@ video-parser/
 ├─ frontend/
 │  ├─ src/
 │  │  ├─ api/
+│  │  ├─ composables/
 │  │  ├─ types/
 │  │  ├─ utils/
 │  │  ├─ App.vue
@@ -518,6 +536,8 @@ video-parser/
 │  └─ wrangler.jsonc
 │
 ├─ shared/
+│  ├─ media.ts
+│  └─ video.ts
 ├─ tests/
 ├─ package.json
 └─ README.md
@@ -577,25 +597,3 @@ video-parser/
 **[在线体验](https://wind-video.ccwu.cc/)** · **[API 状态](https://api.wind-video.ccwu.cc/api/health)**
 
 </div>
-
-## 开发质量检查
-
-```bash
-npm ci
-npm run check
-```
-
-`check` 依次执行 Prettier 格式检查、ESLint、Vitest 回归测试、Vue 模板/脚本类型检查、前端构建及 Worker 类型检查。提交前可运行 `npm run format` 修正格式。仓库通过 `.gitattributes` 和 `.editorconfig` 统一使用 LF，避免 Windows/WSL 换行差异。
-
-前端使用 `vue-tsc`，开发期 TypeScript 固定在 5.9 系列以匹配其编译器接口；不再使用临时生成组件脚本的检查方式。回归测试直接使用 Vitest 模块替身和 Vue effect scope，不再手工加载或编译组件。
-
-- `frontend/src/composables/useVideoPage.ts`：解析请求及取消状态。
-- `frontend/src/composables/useMediaDownloads.ts`：视频、图片及批量下载生命周期。
-- `frontend/src/composables/useNotice.ts`：通知及定时器清理。
-- `worker/src/parsers/douyin.ts`：请求策略与兜底顺序。
-- `worker/src/parsers/douyin/`：页面提取、作品匹配、媒体选择和结果映射。
-- `shared/video.ts`：前后端共用 API 类型。图文完整性只在内部策略结果中记录，不改变 API 响应。
-
-GitHub Actions 会在 main 推送和 Pull Request 时，分别在 Windows 与 Linux 上从锁文件安装依赖并执行 `npm run check`。配置不会自动发布前后端。
-
-开发依赖中的 Miniflare 暂时固定使用已修补的 `undici@7.29.1`，通过根目录 `overrides` 管理；上游更新后可复核并移除此覆盖。
