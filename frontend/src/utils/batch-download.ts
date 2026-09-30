@@ -1,3 +1,4 @@
+import { imageFilename } from '../../../shared/media'
 import { createMediaArchive } from './media-archive'
 import { fetchMediaBlob, saveBlob } from './auto-download'
 import { buildDownloadUrl } from './download'
@@ -77,7 +78,10 @@ export async function downloadMediaArchive(
   }
   const preparePart = async (final: boolean) => {
     onProgress(`正在打包第 ${session.partNumber} 包…`)
-    const blob = await createMediaArchive(session.files, signal)
+    const blob = await createMediaArchive(
+      new Map([...session.files].map(([name, file]) => [imageFilename(name, file.type), file])),
+      signal,
+    )
     signal.throwIfAborted()
     if (session.partNumber === 1 && final) {
       saveBlob(blob, filename)

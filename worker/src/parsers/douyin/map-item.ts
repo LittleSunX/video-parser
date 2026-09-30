@@ -27,7 +27,7 @@ export function mapItemToVideoInfo(
   const video = item.video ?? {}
   const musicUrl = extractFirstUrl(item.music?.play_url)
   const cover =
-    imageAssets[0]?.url ??
+    (imageAssets[0]?.url || undefined) ??
     extractFirstUrl(video.origin_cover) ??
     extractFirstUrl(video.cover) ??
     extractFirstUrl(video.dynamic_cover)
@@ -49,7 +49,7 @@ export function mapItemToVideoInfo(
       if (!image || typeof image !== 'object' || Array.isArray(image)) return true
       const value = image as Record<string, unknown>
       const liveUrl = extractLivePhotoUrl(value)
-      if (!selectBestImageUrl(value)?.url && !liveUrl) return true
+      if (!selectBestImageUrl(value)?.url) return true
       return !!(value.video || value.video_play_addr || value.video_download_addr) && !liveUrl
     })
     return { video: result, imagesComplete: !incompleteImages }

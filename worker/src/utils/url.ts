@@ -72,26 +72,31 @@ export async function resolveSupportedUrl(inputUrl: URL, signal?: AbortSignal): 
       throw new AppError('URL_RESOLVE_FAILED', '展开分享链接失败，请稍后重试', 502)
     }
 
-    if (![301, 302, 303, 307, 308].includes(response.status)) {
-      if (response.ok) {
-        const html = await response.text()
-        const videoId = extractDouyinVideoIdFromHtml(html)
+    try {
+      if (![301, 302, 303, 307, 308].includes(response.status)) {
+        if (response.ok) {
+          const html = await response.text()
+          const videoId = extractDouyinVideoIdFromHtml(html)
 
-        if (videoId) {
-          return new URL('https://www.iesdouyin.com/share/video/' + videoId)
+          if (videoId) {
+            return new URL('https://www.iesdouyin.com/share/video/' + videoId)
+          }
         }
+
+        return current
       }
 
-      return current
+      const location = response.headers.get('location')
+
+      if (!location) {
+        return current
+      }
+
+      current = new URL(location, current)
+    } finally {
+      // 取消未消费的响应，不等待远端清理完成，以免拖延下一跳。
+      if (!response.bodyUsed) void response.body?.cancel().catch(() => {})
     }
-
-    const location = response.headers.get('location')
-
-    if (!location) {
-      return current
-    }
-
-    current = new URL(location, current)
   }
 
   throw new AppError('URL_RESOLVE_FAILED', '分享链接重定向次数过多', 502)
