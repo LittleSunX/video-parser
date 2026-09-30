@@ -1,3 +1,4 @@
+import type { Diagnostics } from '../utils/diagnostics'
 import { AppError } from '../errors/app-error'
 import type { VideoInfo } from '../types/video'
 import { extractDouyinVideoId, MOBILE_USER_AGENT } from '../utils/url'
@@ -24,7 +25,7 @@ export class DouyinParser implements VideoParser {
     }
   }
 
-  async parse(url: string, signal?: AbortSignal): Promise<VideoInfo> {
+  async parse(url: string, signal?: AbortSignal, trace?: Diagnostics): Promise<VideoInfo> {
     const sourceUrl = new URL(url)
     const videoId = extractDouyinVideoId(sourceUrl)
 
@@ -55,7 +56,7 @@ export class DouyinParser implements VideoParser {
       },
     ]
 
-    return runParseStrategies(strategies, signal)
+    return runParseStrategies(strategies, signal, trace)
   }
 
   private async parseFromWebDetail(

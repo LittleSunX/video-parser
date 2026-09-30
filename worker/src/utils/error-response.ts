@@ -20,7 +20,7 @@ export function errorResponse(error: unknown, operation: 'parse' | 'download'): 
   if (error instanceof AppError) {
     const message = PUBLIC_MESSAGES[error.code] ?? error.message
     if (message !== error.message || error.status >= 500) {
-      console.warn('API error:', operation, error.code, error.message)
+      console.warn('API error:', operation, error.code, error.status)
     }
     return jsonResponse(
       { success: false, error: { code: error.code, message } },
@@ -28,7 +28,7 @@ export function errorResponse(error: unknown, operation: 'parse' | 'download'): 
       error.retryAfter ? { 'Retry-After': String(error.retryAfter) } : undefined,
     )
   }
-  console.error('Unexpected API error:', operation, error)
+  console.error('Unexpected API error:', operation)
   return jsonResponse(
     {
       success: false,
