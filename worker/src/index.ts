@@ -1,3 +1,4 @@
+import { imageFilename } from '../../shared/media'
 import { fetchMedia } from './services/media-download'
 import { AppError } from './errors/app-error'
 import { parseVideo } from './services/parse-service'
@@ -90,7 +91,8 @@ async function handleDownload(request: Request, requestUrl: URL, env: Env): Prom
     if (upstream.status !== 416)
       headers.set(
         'Content-Disposition',
-        'attachment; filename="download"; filename*=UTF-8\'\'' + encodeURIComponent(filename),
+        'attachment; filename="download"; filename*=UTF-8\'\'' +
+          encodeURIComponent(imageFilename(filename, contentType)),
       )
     headers.set('Cache-Control', 'private, max-age=0, no-store')
 

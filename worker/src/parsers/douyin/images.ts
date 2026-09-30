@@ -1,6 +1,46 @@
-import type { VideoInfo, ImageAsset } from '../../types/video'
+import type { ImageAsset } from '../../types/video'
 import type { ParsedMediaResult } from './types'
 import { normalizeUrl, extractFirstUrl, toPlayableUrl } from './text'
+
+// 身份信息只在解析期间使用，不暴露在 API 中。
+const identities = new WeakMap<ImageAsset, Set<string>>()
+
+function keys(asset: ImageAsset): Set<string> {
+  return new Set([
+    ...(identities.get(asset) ?? []),
+    ...(asset.url ? ['image:' + asset.url] : []),
+    ...(asset.livePhotoUrl ? ['live:' + asset.livePhotoUrl] : []),
+  ])
+}
+
+export function mergeImageAssets(first: ImageAsset[], second: ImageAsset[]): ImageAsset[] {
+  const result: ImageAsset[] = []
+  for (const asset of [...first, ...second]) {
+    const identity = keys(asset)
+    const matches = result.filter((entry) => [...keys(entry)].some((key) => identity.has(key)))
+    if (!matches.length) {
+      result.push(asset)
+      continue
+    }
+    const existing = matches[0]
+    let merged = existing
+    for (const incoming of [...matches.slice(1), asset]) {
+      const preferIncoming =
+        !merged.url || (!!incoming.url && !merged.watermarkFree && incoming.watermarkFree)
+      merged = {
+        url: preferIncoming ? incoming.url : merged.url,
+        watermarkFree: preferIncoming ? incoming.watermarkFree : merged.watermarkFree,
+        livePhotoUrl: merged.livePhotoUrl || incoming.livePhotoUrl,
+      }
+      for (const key of keys(incoming)) identity.add(key)
+    }
+    for (const entry of matches) for (const key of keys(entry)) identity.add(key)
+    identities.set(merged, identity)
+    result[result.indexOf(existing)] = merged
+    for (const entry of matches.slice(1)) result.splice(result.indexOf(entry), 1)
+  }
+  return result
+}
 
 export function extractImageAssets(input: unknown): ImageAsset[] {
   if (!Array.isArray(input)) {
@@ -8,7 +48,6 @@ export function extractImageAssets(input: unknown): ImageAsset[] {
   }
 
   const assets: ImageAsset[] = []
-  const seen = new Set<string>()
 
   for (const image of input) {
     if (!image || typeof image !== 'object' || Array.isArray(image)) continue
@@ -21,11 +60,6 @@ export function extractImageAssets(input: unknown): ImageAsset[] {
 
     const normalizedImage = selected?.url ? normalizeUrl(selected.url) : ''
     const normalizedLive = livePhotoUrl ? toPlayableUrl(normalizeUrl(livePhotoUrl)) : undefined
-    const key = normalizedImage + '|' + (normalizedLive ?? '')
-
-    if (seen.has(key)) continue
-    seen.add(key)
-
     if (selected) {
       console.info(
         '[DouyinParser] selected image source:',
@@ -34,14 +68,17 @@ export function extractImageAssets(input: unknown): ImageAsset[] {
       )
     }
 
-    assets.push({
+    const asset: ImageAsset = {
       url: normalizedImage,
       livePhotoUrl: normalizedLive,
       watermarkFree: selected?.watermarkFree ?? false,
-    })
+    }
+    const uri = extractUri(object)
+    if (uri) identities.set(asset, new Set(['uri:' + uri]))
+    assets.push(asset)
   }
 
-  return assets
+  return mergeImageAssets([], assets)
 }
 
 export interface ImageUrlCandidate {
@@ -145,17 +182,10 @@ export function imageFormatRank(url: string): number {
   return path.includes('.webp') ? 1 : 0
 }
 
-export function scoreImageResult(result: VideoInfo): number {
-  const images = result.images ?? []
-  const liveCount = images.filter((image) => !!image.livePhotoUrl).length
-  const cleanCount = images.filter((image) => image.watermarkFree).length
-  return liveCount * 10000 + cleanCount * 100 + images.length
-}
-
 export function isHighConfidenceImageResult(result: ParsedMediaResult): boolean {
   const images = result.video.images ?? []
   if (images.length === 0) return false
-  const allClean = images.every((image) => image.watermarkFree || !image.url)
+  const allClean = images.every((image) => !!image.url && image.watermarkFree)
   return allClean && result.imagesComplete
 }
 

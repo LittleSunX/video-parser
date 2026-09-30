@@ -88,6 +88,15 @@ export async function fetchMedia(
       throw new AppError('DOWNLOAD_FAILED', '媒体资源下载失败（HTTP ' + upstream.status + '）', 502)
     }
 
+    const contentType = upstream.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase()
+    // 缺失类型和通用二进制仍可流式透传，明确的网页/JSON 等错误内容不能作为媒体保存。
+    if (
+      contentType &&
+      !/^(video|image|audio)\//.test(contentType) &&
+      contentType !== 'application/octet-stream'
+    ) {
+      throw new AppError('MEDIA_UNAVAILABLE', '上游返回的内容不是媒体文件', 422)
+    }
     if (!upstream.body) throw new AppError('DOWNLOAD_FAILED', '媒体响应为空', 502)
     clearTimeout(timer)
     const body = guardMediaStream(upstream.body, controller, cleanup)

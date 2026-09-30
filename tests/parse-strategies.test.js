@@ -130,7 +130,9 @@ test('clean still-only fallback cannot replace the three known dynamic tracks', 
     { name: 'live', run: async () => original },
     { name: 'stills', run: async () => stills },
   ])
-  expect(result).toBe(original.video)
+  expect(result.images).toEqual(
+    original.video.images.map((image) => ({ ...image, watermarkFree: true })),
+  )
 })
 
 test('shorter clean result cannot replace a longer known image list at exhaustion', async () => {
@@ -147,7 +149,9 @@ test('shorter clean result cannot replace a longer known image list at exhaustio
     { name: 'full', run: async () => full },
     { name: 'short-clean', run: async () => shorter },
   ])
-  expect(result).toBe(full.video)
+  expect(result.images).toEqual(
+    full.video.images.map((image, i) => ({ ...image, watermarkFree: i < 2 })),
+  )
   expect(result.images).toHaveLength(3)
 })
 
@@ -166,7 +170,9 @@ test('longer result replaces an earlier partial clean list despite its lower qua
     { name: 'partial', run: async () => partial },
     { name: 'full', run: async () => full },
   ])
-  expect(result).toBe(full.video)
+  expect(result.images).toEqual(
+    full.video.images.map((image, i) => ({ ...image, watermarkFree: i < 2 })),
+  )
 })
 
 test('shared timeout returns the longer list after seeing a shorter clean fallback', async () => {
@@ -194,5 +200,7 @@ test('shared timeout returns the longer list after seeing a shorter clean fallba
     ],
     controller.signal,
   )
-  expect(result).toBe(full.video)
+  expect(result.images).toEqual(
+    full.video.images.map((image, i) => ({ ...image, watermarkFree: i < 2 })),
+  )
 })

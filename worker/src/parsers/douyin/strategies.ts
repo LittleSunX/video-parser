@@ -1,7 +1,7 @@
 import { AppError } from '../../errors/app-error'
 import type { VideoInfo } from '../../types/video'
 import type { ParsedMediaResult } from './types'
-import { isHighConfidenceImageResult, scoreImageResult } from './images'
+import { isHighConfidenceImageResult, mergeImageAssets } from './images'
 
 interface ParseStrategy {
   name: string
@@ -18,9 +18,6 @@ export function runParseStrategies(
     const controller = new AbortController()
     const failures: string[] = []
     let bestImage: VideoInfo | undefined
-    let bestScore = -1
-    let knownImageCount = 0
-    let knownLiveCount = 0
     let next = 0
     let active = 0
     let settled = false
@@ -55,27 +52,22 @@ export function runParseStrategies(
         return
       }
       if (!video.images?.length) return
-      knownImageCount = Math.max(knownImageCount, video.images.length)
-      knownLiveCount = Math.max(
-        knownLiveCount,
-        video.images.filter((image) => image.livePhotoUrl).length,
-      )
-      const score = scoreImageResult(video)
-      const bestCount = bestImage?.images?.length ?? 0
-      // 先保留更多资源；数量相同时再比较动态轨和图片质量。
-      if (
-        video.images.length > bestCount ||
-        (video.images.length === bestCount && score > bestScore)
-      ) {
-        bestImage = video
-        bestScore = score
+      if (!bestImage) bestImage = video
+      else {
+        const previous = bestImage.images ?? []
+        // 采用更完整列表的顺序；始终按身份补充资源，不按下标配对。
+        const images =
+          video.images.length > previous.length
+            ? mergeImageAssets(video.images, previous)
+            : mergeImageAssets(previous, video.images)
+        bestImage = { ...bestImage, images }
       }
-      // 不因另一份结果图片无水印就提前放弃已发现的动态轨或更多图片。
-      const keepsKnownResources =
-        video.images.length >= knownImageCount &&
-        video.images.filter((image) => image.livePhotoUrl).length >= knownLiveCount
-      if (isHighConfidenceImageResult(result) && bestImage === video && keepsKnownResources)
-        finish(video)
+      // 完整性仍由当前策略确认；合并只补充已识别资源，不推测缺失项。
+      if (
+        video.images.length >= (bestImage.images?.length ?? 0) &&
+        isHighConfidenceImageResult({ ...result, video: bestImage })
+      )
+        finish(bestImage)
     }
 
     function launch() {
