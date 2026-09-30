@@ -1,4 +1,4 @@
-import { createDiagnostics, mediaCounts, withDiagnostics } from './utils/diagnostics'
+import { createDiagnostics, errorCode, mediaCounts, withDiagnostics } from './utils/diagnostics'
 import type { Diagnostics } from './utils/diagnostics'
 import { imageFilename } from '../../shared/media'
 import { fetchMedia } from './services/media-download'
@@ -16,7 +16,8 @@ export default {
     const started = Date.now()
     const response = await routeRequest(request, env, trace)
     const path = new URL(request.url).pathname
-    const operation = path === '/api/parse' ? 'parse' : path === '/api/download' ? 'download' : 'other'
+    const operation =
+      path === '/api/parse' ? 'parse' : path === '/api/download' ? 'download' : 'other'
     trace.emit('request_response', {
       operation,
       status: response.status,
@@ -47,7 +48,7 @@ async function routeRequest(request: Request, env: Env, trace: Diagnostics): Pro
   }
 
   if (request.method === 'GET' && url.pathname === '/api/download') {
-    return handleDownload(request, url, env)
+    return handleDownload(request, url, env, trace)
   }
 
   if (request.method === 'POST' && url.pathname === '/api/parse') {
@@ -69,11 +70,17 @@ async function handleParse(request: Request, env: Env, trace: Diagnostics): Prom
       data: video,
     })
   } catch (error) {
+    trace.emit('request_error', { code: errorCode(error) })
     return errorResponse(error, 'parse')
   }
 }
 
-async function handleDownload(request: Request, requestUrl: URL, env: Env): Promise<Response> {
+async function handleDownload(
+  request: Request,
+  requestUrl: URL,
+  env: Env,
+  trace: Diagnostics,
+): Promise<Response> {
   try {
     await enforceRateLimit(request, env, 'download')
     const rawUrl = requestUrl.searchParams.get('url')
@@ -121,6 +128,7 @@ async function handleDownload(request: Request, requestUrl: URL, env: Env): Prom
       headers,
     })
   } catch (error) {
+    trace.emit('request_error', { code: errorCode(error) })
     return errorResponse(error, 'download')
   }
 }

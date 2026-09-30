@@ -45,8 +45,14 @@ export function runParseStrategies(
     }
 
     function onAbort() {
-      if (signal?.reason?.name === 'TimeoutError' && bestImage) finish(bestImage, undefined, 'timeout')
-      else finish(undefined, signal?.reason, signal?.reason?.name === 'TimeoutError' ? 'timeout' : 'cancelled')
+      if (signal?.reason?.name === 'TimeoutError' && bestImage)
+        finish(bestImage, undefined, 'timeout')
+      else
+        finish(
+          undefined,
+          signal?.reason,
+          signal?.reason?.name === 'TimeoutError' ? 'timeout' : 'cancelled',
+        )
     }
 
     function schedule() {
@@ -130,6 +136,11 @@ export function runParseStrategies(
 
     signal?.addEventListener('abort', onAbort, { once: true })
     if (strategies.length) launch()
-    else finish(undefined, new AppError('VIDEO_RESOURCE_NOT_FOUND', '没有可用解析策略', 422), 'exhausted')
+    else
+      finish(
+        undefined,
+        new AppError('VIDEO_RESOURCE_NOT_FOUND', '没有可用解析策略', 422),
+        'exhausted',
+      )
   })
 }

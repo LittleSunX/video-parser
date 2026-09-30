@@ -48,13 +48,18 @@ test('health exposes deployment identity and responses preserve CORS headers', a
 
 test('concurrent parse requests have independent traces without leaking media data', async () => {
   const logs = vi.spyOn(console, 'info').mockImplementation(() => {})
-  vi.stubGlobal('fetch', vi.fn(async () => Response.json({
-    aweme_detail: {
-      aweme_id: '123',
-      desc: video.title,
-      video: { play_addr: { url_list: [video.videoUrl] } },
-    },
-  })))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      Response.json({
+        aweme_detail: {
+          aweme_id: '123',
+          desc: video.title,
+          video: { play_addr: { url_list: [video.videoUrl] } },
+        },
+      }),
+    ),
+  )
   const responses = await Promise.all([worker.fetch(request(), env), worker.fetch(request(), env)])
   const ids = responses.map((response) => response.headers.get('X-Request-ID'))
   expect(new Set(ids).size).toBe(2)
@@ -64,11 +69,15 @@ test('concurrent parse requests have independent traces without leaking media da
   for (const id of ids) {
     const events = records.filter((record) => record.requestId === id)
     expect(events.find((record) => record.event === 'strategy_complete')).toMatchObject({
-      strategy: 'web-detail', outcome: 'success', videos: 1,
+      strategy: 'web-detail',
+      outcome: 'success',
+      videos: 1,
     })
     expect(events.find((record) => record.event === 'parse_result')).toMatchObject({ videos: 1 })
     expect(events.find((record) => record.event === 'request_response')).toMatchObject({
-      status: 200, operation: 'parse', version: 'deployment-123',
+      status: 200,
+      operation: 'parse',
+      version: 'deployment-123',
     })
     expect(events.every((record) => !('durationMs' in record) || record.durationMs >= 0)).toBe(true)
   }
@@ -77,7 +86,8 @@ test('concurrent parse requests have independent traces without leaking media da
 
 test('invalid and rate-limited requests retain correlation and retry headers', async () => {
   const response = await worker.fetch(request(), {
-    ...env, PARSE_RATE_LIMITER: { limit: async () => ({ success: false }) },
+    ...env,
+    PARSE_RATE_LIMITER: { limit: async () => ({ success: false }) },
   })
   expect(response.status).toBe(429)
   expect(response.headers.get('Retry-After')).toBe('60')
@@ -92,17 +102,32 @@ test('invalid and rate-limited requests retain correlation and retry headers', a
 
 test('download diagnostics preserve partial responses without consuming their streams', async () => {
   let cancelled = false
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream({
-    start(controller) { controller.enqueue(new Uint8Array([1, 2])) },
-    cancel() { cancelled = true },
-  }), {
-    status: 206,
-    headers: { 'Content-Type': 'video/mp4', 'Content-Range': 'bytes 0-1/10' },
-  })))
-  const response = await worker.fetch(new Request(
-    api + '/api/download?url=' + encodeURIComponent(video.videoUrl),
-    { headers: { Range: 'bytes=0-1' } },
-  ), env)
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array([1, 2]))
+            },
+            cancel() {
+              cancelled = true
+            },
+          }),
+          {
+            status: 206,
+            headers: { 'Content-Type': 'video/mp4', 'Content-Range': 'bytes 0-1/10' },
+          },
+        ),
+    ),
+  )
+  const response = await worker.fetch(
+    new Request(api + '/api/download?url=' + encodeURIComponent(video.videoUrl), {
+      headers: { Range: 'bytes=0-1' },
+    }),
+    env,
+  )
   expect(response.status).toBe(206)
   expect(response.headers.get('Content-Range')).toBe('bytes 0-1/10')
   expect(response.headers.get('Access-Control-Expose-Headers')).toContain('Content-Range')
@@ -116,14 +141,28 @@ test('download diagnostics preserve partial responses without consuming their st
 test('partial image fallback logs exhaustion instead of claiming complete selection', async () => {
   const emit = vi.fn()
   const partial = { mediaType: 'image', images: [{ url: '', livePhotoUrl: video.videoUrl }] }
-  const result = await runParseStrategies([
-    { name: 'partial', run: async () => ({ video: partial, imagesComplete: false }) },
-    { name: 'failed', run: async () => { throw new Error('PRIVATE_SIGNATURE') } },
-  ], undefined, { requestId: 'test', version: 'test', emit })
+  const result = await runParseStrategies(
+    [
+      { name: 'partial', run: async () => ({ video: partial, imagesComplete: false }) },
+      {
+        name: 'failed',
+        run: async () => {
+          throw new Error('PRIVATE_SIGNATURE')
+        },
+      },
+    ],
+    undefined,
+    { requestId: 'test', version: 'test', emit },
+  )
   expect(result).toBe(partial)
-  expect(emit).toHaveBeenCalledWith('parse_selection', expect.objectContaining({
-    reason: 'exhausted', images: 0, livePhotos: 1,
-  }))
+  expect(emit).toHaveBeenCalledWith(
+    'parse_selection',
+    expect.objectContaining({
+      reason: 'exhausted',
+      images: 0,
+      livePhotos: 1,
+    }),
+  )
   expect(JSON.stringify(emit.mock.calls)).not.toContain('PRIVATE_SIGNATURE')
 })
 
@@ -131,55 +170,97 @@ test('timeout returns usable partial resources and marks timeout in diagnostics'
   vi.useFakeTimers()
   const emit = vi.fn()
   const controller = new AbortController()
-  const running = runParseStrategies([
-    { name: 'partial', run: async () => ({
-      video: { mediaType: 'image', images: [{ url: 'https://images/1' }] },
-      imagesComplete: false,
-    }) },
-    { name: 'slow', run: (signal) => new Promise((_, reject) => {
-      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
-    }) },
-  ], controller.signal, { requestId: 'test', version: 'test', emit })
+  const running = runParseStrategies(
+    [
+      {
+        name: 'partial',
+        run: async () => ({
+          video: { mediaType: 'image', images: [{ url: 'https://images/1' }] },
+          imagesComplete: false,
+        }),
+      },
+      {
+        name: 'slow',
+        run: (signal) =>
+          new Promise((_, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+          }),
+      },
+    ],
+    controller.signal,
+    { requestId: 'test', version: 'test', emit },
+  )
   await vi.advanceTimersByTimeAsync(100)
   controller.abort(new DOMException('timeout', 'TimeoutError'))
   expect((await running).images).toHaveLength(1)
-  expect(emit).toHaveBeenCalledWith('parse_selection', expect.objectContaining({
-    reason: 'timeout', outcome: 'success',
-  }))
+  expect(emit).toHaveBeenCalledWith(
+    'parse_selection',
+    expect.objectContaining({
+      reason: 'timeout',
+      outcome: 'success',
+    }),
+  )
   expect(vi.getTimerCount()).toBe(0)
 })
 
 test('client cancellation is diagnosed separately from a failed strategy', async () => {
   const emit = vi.fn()
   const controller = new AbortController()
-  const running = runParseStrategies([
-    { name: 'slow', run: (signal) => new Promise((_, reject) => {
-      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
-    }) },
-  ], controller.signal, { requestId: 'test', version: 'test', emit })
+  const running = runParseStrategies(
+    [
+      {
+        name: 'slow',
+        run: (signal) =>
+          new Promise((_, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+          }),
+      },
+    ],
+    controller.signal,
+    { requestId: 'test', version: 'test', emit },
+  )
   const rejected = expect(running).rejects.toHaveProperty('name', 'AbortError')
   controller.abort()
   await rejected
-  expect(emit).toHaveBeenCalledWith('parse_selection', expect.objectContaining({
-    reason: 'cancelled', outcome: 'cancelled',
-  }))
+  expect(emit).toHaveBeenCalledWith(
+    'parse_selection',
+    expect.objectContaining({
+      reason: 'cancelled',
+      outcome: 'cancelled',
+    }),
+  )
 })
 
 test('frontend errors include a server request ID without changing successful payloads', async () => {
   const id = crypto.randomUUID()
-  vi.stubGlobal('fetch', vi.fn(async () => Response.json(
-    { success: false, error: { message: '请重新解析' } },
-    { status: 422, headers: { 'X-Request-ID': id } },
-  )))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      Response.json(
+        { success: false, error: { message: '请重新解析' } },
+        { status: 422, headers: { 'X-Request-ID': id } },
+      ),
+    ),
+  )
   await expect(parseVideo(source)).rejects.toThrow(id)
-  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ success: true, data: video })))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ success: true, data: video })),
+  )
   expect(await parseVideo(source)).toEqual(video)
 })
 
 test('frontend does not display untrusted correlation header text', async () => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('gateway', {
-    status: 502, headers: { 'X-Request-ID': 'PRIVATE_HEADER_TEXT' },
-  })))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response('gateway', {
+          status: 502,
+          headers: { 'X-Request-ID': 'PRIVATE_HEADER_TEXT' },
+        }),
+    ),
+  )
   await expect(parseVideo(source)).rejects.not.toThrow('PRIVATE_HEADER_TEXT')
 })
 

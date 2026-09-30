@@ -33,6 +33,7 @@
 
 - 所有 Worker 响应包含 `X-Request-ID`、`X-Worker-Version`，并通过 CORS 暴露。请求编号由服务端生成，不信任客户端同名头。前端解析失败时将可用编号附在错误提示后。
 - `request_response`：接口类别、HTTP 状态、返回响应前的耗时。对于下载，它只表示响应已准备好，不代表传输完成或手机已保存。
+- `request_error`：受控错误码，不包含原始错误内容；可与同一请求编号的 HTTP 状态关联。
 - `resolve_complete`：短链展开耗时及成功、错误或取消。
 - `strategy_complete`：策略名称、耗时、结果计数、完整性标志及成功、错误或取消。策略成功不等于资源完整。
 - `parse_selection`：结束原因 `complete`、`exhausted`、`timeout` 或 `cancelled`。`complete` 表示满足现有策略选择条件，不是对上游作品完整性的独立证明。
