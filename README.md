@@ -433,6 +433,14 @@ GitHub Actions 会在 main 推送和 Pull Request 时，分别在 Windows 与 Li
 
 ---
 
+## 🔎 版本与稳定性验收
+
+前端构建后可访问 `/version.json` 查看提交号和构建时间；后端 `/api/health` 返回 Cloudflare 部署版本。API 响应包含 `X-Request-ID` 和 `X-Worker-Version`，解析失败提示会附带可用的请求编号，便于关联策略耗时与资源数量日志。
+
+固定验收样本、手机保存检查清单、诊断字段说明及发布记录模板见 [稳定性验收计划](docs/stability-plan.md)。下载响应成功不代表手机已经保存，真实保存行为需单独验收。
+
+---
+
 ## ☁️ 部署
 
 推荐部署架构：
@@ -522,7 +530,7 @@ video-parser/
 │  │  └─ main.ts
 │  ├─ .env.example
 │  ├─ package.json
-│  └─ vite.config.ts
+│  └─ vite.config.mjs
 │
 ├─ worker/
 │  ├─ src/

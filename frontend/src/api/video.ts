@@ -16,5 +16,14 @@ export async function parseVideo(input: string, signal?: AbortSignal): Promise<V
     signal?.throwIfAborted()
     throw new Error('网络连接失败，请检查网络后重试')
   }
-  return readVideoResponse(response, signal)
+  try {
+    return await readVideoResponse(response, signal)
+  } catch (error) {
+    signal?.throwIfAborted()
+    const requestId = response.headers.get('X-Request-ID')
+    if (error instanceof Error && requestId && /^[0-9a-f-]{36}$/i.test(requestId)) {
+      throw new Error(error.message + '（请求编号：' + requestId + '）', { cause: error })
+    }
+    throw error
+  }
 }
