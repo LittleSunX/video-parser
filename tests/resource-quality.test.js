@@ -1,6 +1,7 @@
 import { test, expect, afterEach, vi } from 'vitest'
 import { DouyinParser } from '../worker/src/parsers/douyin'
 import { mapItemToVideoInfo } from '../worker/src/parsers/douyin/map-item'
+import { runParseStrategies } from '../worker/src/parsers/douyin/strategies'
 import { buildImageFilename } from '../frontend/src/utils/download'
 import { downloadMediaArchive } from '../frontend/src/utils/batch-download'
 import { saveBlob } from '../frontend/src/utils/auto-download'
@@ -19,6 +20,108 @@ afterEach(() => {
 })
 const id = '7690537093143539065'
 const url = new URL('https://www.douyin.com/video/' + id)
+
+test('a single ordinary photo is complete independently of watermark confidence at exhaustion', async () => {
+  const sampleId = '7693516298538737329'
+  const source = new URL('https://www.iesdouyin.com/share/note/' + sampleId + '/')
+  const mapped = mapItemToVideoInfo(
+    {
+      aweme_id: sampleId,
+      desc: '王者万象棋棋手从夯到拉排行！',
+      author: { nickname: '天成（王者万象棋）' },
+      images: [
+        {
+          uri: 'ranking-image',
+          url_list: ['https://p.douyinpic.com/ranking.jpg'],
+          download_url_list: ['https://p.douyinpic.com/ranking-download.jpg'],
+          width: 1824,
+          height: 2336,
+        },
+      ],
+      music: { title: '@依雾雨创作的原声', play_url: { url_list: ['https://audio/music.mp3'] } },
+    },
+    source,
+    sampleId,
+  )
+  const fallback = vi.fn(async () => {
+    throw new Error('no additional source')
+  })
+  const result = await runParseStrategies([
+    { name: 'web-detail', run: async () => mapped },
+    { name: 'fallback', run: fallback },
+  ])
+  expect(fallback).toHaveBeenCalledOnce()
+  expect(result).toMatchObject({
+    imagesComplete: true,
+    parseStatus: 'unverified',
+    parseReason: 'exhausted',
+    author: '天成（王者万象棋）',
+    musicUrl: 'https://audio/music.mp3',
+    musicTitle: '@依雾雨创作的原声',
+    images: [{ url: 'https://p.douyinpic.com/ranking.jpg', watermarkFree: false }],
+  })
+  expect(result.images).toHaveLength(1)
+  expect(result.images[0].livePhotoUrl).toBeUndefined()
+})
+
+test.each([
+  { images: [{ url_list: ['https://images/one'] }, {}] },
+  { images: [{ url_list: ['https://images/one'], video: {} }] },
+])(
+  'known missing image or live resources remain unconfirmed at exhaustion (%j)',
+  async ({ images }) => {
+    const mapped = mapItemToVideoInfo({ images }, url, id)
+    const result = await runParseStrategies([{ name: 'partial', run: async () => mapped }])
+    expect(result.imagesComplete).toBe(false)
+    expect(result.parseReason).toBe('exhausted')
+  },
+)
+
+test('a clean still-only source cannot confirm a previously declared missing live track', async () => {
+  const mapped = mapItemToVideoInfo(
+    { images: [{ uri: 'one', url_list: ['https://images/one'], video: {} }] },
+    url,
+    id,
+  )
+  const still = mapItemToVideoInfo(
+    { images: [{ uri: 'one', watermark_free_download_url_list: ['https://images/clean'] }] },
+    url,
+    id,
+  )
+  const result = await runParseStrategies([
+    { name: 'partial-live', run: async () => mapped },
+    { name: 'clean-still', run: async () => still },
+  ])
+  expect(result.images).toHaveLength(1)
+  expect(result.images[0].watermarkFree).toBe(true)
+  expect(result.images[0].livePhotoUrl).toBeUndefined()
+  expect(result.imagesComplete).toBe(false)
+})
+
+test('a missing declared live track keeps seeking fallback after clean stills arrive', async () => {
+  const item = { images: [{ uri: 'one', url_list: ['https://images/one'], video: {} }] }
+  const mapped = mapItemToVideoInfo(item, url, id)
+  const still = mapItemToVideoInfo(
+    { images: [{ uri: 'one', watermark_free_download_url_list: ['https://images/clean'] }] },
+    url,
+    id,
+  )
+  const recovered = mapItemToVideoInfo(
+    { images: [{ ...item.images[0], video: { play_addr: { uri: 'live-one' } } }] },
+    url,
+    id,
+  )
+  const recoverLive = vi.fn(async () => recovered)
+  const result = await runParseStrategies([
+    { name: 'partial-live', run: async () => mapped },
+    { name: 'clean-still', run: async () => still },
+    { name: 'recover-live', run: recoverLive },
+  ])
+  expect(recoverLive).toHaveBeenCalledOnce()
+  expect(result.imagesComplete).toBe(true)
+  expect(result.images[0].watermarkFree).toBe(true)
+  expect(result.images[0].livePhotoUrl).toContain('video_id=live-one')
+})
 
 test('live-only entry continues fallback to recover its still image', async () => {
   let calls = 0

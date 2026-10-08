@@ -28,7 +28,12 @@ test('fast complete primary avoids all backup requests', async () => {
       { name: 'primary', run: async () => result },
       { name: 'backup', run: backup },
     ]),
-  ).toEqual({ ...result.video, parseStatus: 'complete', parseReason: 'complete' })
+  ).toEqual({
+    ...result.video,
+    imagesComplete: true,
+    parseStatus: 'complete',
+    parseReason: 'complete',
+  })
   expect(backup).not.toHaveBeenCalled()
 })
 
@@ -155,6 +160,7 @@ test('shorter clean result cannot replace a longer known image list at exhaustio
   expect(result.images).toHaveLength(3)
   expect(result.parseStatus).toBe('unverified')
   expect(result.parseReason).toBe('exhausted')
+  expect(result.imagesComplete).toBe(true)
 })
 
 test('longer result replaces an earlier partial clean list despite its lower quality score', async () => {
@@ -207,6 +213,46 @@ test('shared timeout returns the longer list after seeing a shorter clean fallba
   )
   expect(result.parseStatus).toBe('unverified')
   expect(result.parseReason).toBe('timeout')
+  expect(result.imagesComplete).toBe(true)
+})
+
+test('a shorter complete source cannot confirm a longer incomplete image list', async () => {
+  const partial = imageResult(false)
+  partial.imagesComplete = false
+  const shorter = imageResult()
+  shorter.video.images = shorter.video.images.slice(0, 2)
+  const result = await runParseStrategies([
+    { name: 'partial', run: async () => partial },
+    { name: 'shorter', run: async () => shorter },
+  ])
+  expect(result.images).toHaveLength(3)
+  expect(result.imagesComplete).toBe(false)
+})
+
+test('a longer incomplete result revokes an earlier completeness confirmation', async () => {
+  const shorter = imageResult(false)
+  shorter.video.images = shorter.video.images.slice(0, 2)
+  const longer = imageResult(false)
+  longer.imagesComplete = false
+  const result = await runParseStrategies([
+    { name: 'shorter', run: async () => shorter },
+    { name: 'longer', run: async () => longer },
+  ])
+  expect(result.images).toHaveLength(3)
+  expect(result.imagesComplete).toBe(false)
+})
+
+test('disjoint complete sources cannot confirm the whole merged list', async () => {
+  const first = imageResult(false)
+  first.video.images = first.video.images.slice(0, 1)
+  const second = imageResult(false)
+  second.video.images = second.video.images.slice(1)
+  const result = await runParseStrategies([
+    { name: 'first', run: async () => first },
+    { name: 'second', run: async () => second },
+  ])
+  expect(result.images).toHaveLength(3)
+  expect(result.imagesComplete).toBe(false)
 })
 
 test('fallback supplements missing metadata without losing known live tracks', async () => {

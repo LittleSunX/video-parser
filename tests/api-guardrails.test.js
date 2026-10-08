@@ -313,3 +313,33 @@ test('frontend rejects malformed payloads and preserves useful API error message
     )
   }
 })
+
+test('frontend validates image completeness independently of strategy and watermark status', async () => {
+  const image = {
+    platform: 'douyin',
+    mediaType: 'image',
+    videoId: '123',
+    title: 'Test',
+    sourceUrl: 'https://www.douyin.com/note/123',
+    images: [{ url: 'https://p.douyinpic.com/image.jpg', watermarkFree: false }],
+    parseStatus: 'unverified',
+    parseReason: 'exhausted',
+  }
+  for (const imagesComplete of [true, false, undefined]) {
+    const data = { ...image, imagesComplete }
+    const payload = Response.json({ success: true, data })
+    assert.equal((await readVideoResponse(payload)).imagesComplete, imagesComplete)
+  }
+  for (const state of [
+    { imagesComplete: 'true' },
+    { imagesComplete: null },
+    { imagesComplete: true, images: [] },
+    { imagesComplete: true, images: [{ url: '', livePhotoUrl: 'https://live/video' }] },
+    { imagesComplete: true, mediaType: 'video', videoUrl: 'https://video/example' },
+  ]) {
+    await assert.rejects(
+      readVideoResponse(Response.json({ success: true, data: { ...image, ...state } })),
+      /资源状态异常/,
+    )
+  }
+})

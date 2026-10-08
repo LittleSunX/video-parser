@@ -426,6 +426,79 @@ test('partial parse results remain available with a persistent warning until a c
   assert.match(app.notice.value, /图文解析成功/)
 })
 
+test.each(['exhausted', 'timeout'])(
+  'complete images with unknown watermark show a neutral notice after %s',
+  async (parseReason) => {
+    const parsed = {
+      mediaType: 'image',
+      title: '排名图文',
+      author: '天成（王者万象棋）',
+      musicUrl: 'https://music/example.mp3',
+      images: [{ url: 'https://image/1', watermarkFree: false }],
+      imagesComplete: true,
+      parseStatus: 'unverified',
+      parseReason,
+    }
+    const { app } = createApp(async () => parsed)
+    app.input.value = url
+    await app.handleParse()
+    assert.equal(app.parseWarning.value, '')
+    assert.match(app.imageQualityNotice.value, /图片已获取，无水印状态未确认/)
+    assert.equal(app.notice.value, '图文解析成功')
+    assert.equal(app.video.value.author, parsed.author)
+    assert.equal(app.video.value.musicUrl, parsed.musicUrl)
+    assert.equal(app.video.value.images[0].watermarkFree, false)
+    app.handleClear()
+    assert.equal(app.imageQualityNotice.value, '')
+  },
+)
+
+test.each([
+  ['unverified', 'exhausted'],
+  ['unverified', 'timeout'],
+  ['complete', 'complete'],
+])(
+  'known missing image resources keep a warning with %s / %s',
+  async (parseStatus, parseReason) => {
+    const { app } = createApp(async () => ({
+      mediaType: 'image',
+      images: [{ url: 'https://image/1', watermarkFree: true }],
+      imagesComplete: false,
+      parseStatus,
+      parseReason,
+    }))
+    app.input.value = url
+    await app.handleParse()
+    assert.notEqual(app.parseWarning.value, '')
+    assert.match(app.notice.value, /完整性尚未确认/)
+    assert.equal(app.imageQualityNotice.value, '')
+  },
+)
+
+test('a complete live album retains its dynamic tracks without a completeness warning', async () => {
+  const images = [1, 2, 3].map((index) => ({
+    url: 'https://images/' + index,
+    livePhotoUrl: 'https://live/' + index,
+    watermarkFree: false,
+  }))
+  const { app } = createApp(async () => ({
+    mediaType: 'image',
+    images,
+    imagesComplete: true,
+    parseStatus: 'unverified',
+    parseReason: 'exhausted',
+  }))
+  app.input.value = url
+  await app.handleParse()
+  assert.equal(app.livePhotoCount.value, 3)
+  assert.deepEqual(app.video.value.images, images)
+  assert.equal(app.parseWarning.value, '')
+  assert.match(app.imageQualityNotice.value, /无水印状态未确认/)
+  assert.equal(app.notice.value, '实况图文解析成功')
+  app.video.value.images.forEach((image) => (image.watermarkFree = true))
+  assert.equal(app.imageQualityNotice.value, '')
+})
+
 test('native download failure offers reparse and stale failures cannot replace newer state', () => {
   const { app } = createApp()
   const callbacks = []

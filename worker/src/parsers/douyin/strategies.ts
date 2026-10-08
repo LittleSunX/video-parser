@@ -2,7 +2,7 @@ import { errorCode, mediaCounts, type Diagnostics } from '../../utils/diagnostic
 import { AppError } from '../../errors/app-error'
 import type { VideoInfo } from '../../types/video'
 import type { ParsedMediaResult } from './types'
-import { isHighConfidenceImageResult, mergeImageAssets } from './images'
+import { hasAllImageResources, isHighConfidenceImageResult, mergeImageAssets } from './images'
 
 interface ParseStrategy {
   name: string
@@ -20,6 +20,7 @@ export function runParseStrategies(
     const controller = new AbortController()
     const failures: string[] = []
     let bestImage: VideoInfo | undefined
+    let imagesComplete = false
     let next = 0
     let active = 0
     let settled = false
@@ -43,6 +44,9 @@ export function runParseStrategies(
       if (video)
         resolve({
           ...video,
+          ...(video.images
+            ? { imagesComplete: imagesComplete && hasAllImageResources(video.images) }
+            : {}),
           parseStatus: reason === 'complete' ? 'complete' : 'unverified',
           parseReason: reason === 'cancelled' ? 'exhausted' : reason,
         })
@@ -75,8 +79,10 @@ export function runParseStrategies(
       }
       if (bestImage) bestImage = mergeMetadata(bestImage, video)
       if (!video.images?.length) return
-      if (!bestImage) bestImage = video
-      else {
+      if (!bestImage) {
+        bestImage = video
+        imagesComplete = result.imagesComplete
+      } else {
         const previous = bestImage.images ?? []
         // 采用更完整列表的顺序；始终按身份补充资源，不按下标配对。
         const images =
@@ -84,6 +90,9 @@ export function runParseStrategies(
             ? mergeImageAssets(video.images, previous)
             : mergeImageAssets(previous, video.images)
         bestImage = { ...bestImage, images }
+        // 新增资源或明确缺项时撤销确认；较短列表不能确认整个合并结果。
+        if (!result.imagesComplete || images.length > previous.length) imagesComplete = false
+        if (result.imagesComplete && video.images.length >= images.length) imagesComplete = true
       }
       // 完整性仍由当前策略确认；合并只补充已识别资源，不推测缺失项。
       if (

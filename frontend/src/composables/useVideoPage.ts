@@ -19,11 +19,20 @@ export function useVideoPage() {
     () => video.value?.images?.filter((image) => !!image.livePhotoUrl).length ?? 0,
   )
   const parseWarning = computed(() => {
-    if (video.value?.parseStatus !== 'unverified') return ''
+    if (!video.value) return ''
+    if (video.value.mediaType === 'image' && video.value.imagesComplete === true) return ''
+    if (video.value.imagesComplete !== false && video.value.parseStatus !== 'unverified') return ''
     return video.value.parseReason === 'timeout'
       ? '解析等待超时，已保留获取到的资源；资源可能不完整，可重新解析尝试补齐。'
-      : '已尝试所有解析方式，资源完整性尚未确认；可下载已有资源或重新解析。'
+      : '已获取可用资源，尚无法确认图片及实况资源是否齐全；可下载已有资源或重新解析尝试补齐。'
   })
+  const imageQualityNotice = computed(() =>
+    video.value?.mediaType === 'image' &&
+    video.value.imagesComplete === true &&
+    video.value.images?.some((image) => !!image.url && !image.watermarkFree)
+      ? '图片已获取，无水印状态未确认；可下载高清原图。'
+      : '',
+  )
 
   async function handleParse() {
     if (!canSubmit.value) return
@@ -104,6 +113,7 @@ export function useVideoPage() {
     canSubmit,
     livePhotoCount,
     parseWarning,
+    imageQualityNotice,
     handleParse,
     cancelParse,
     handleClear,
