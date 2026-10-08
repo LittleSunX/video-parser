@@ -21,6 +21,8 @@ export interface VideoInfo {
   images?: ImageAsset[]
   musicUrl?: string
   musicTitle?: string
+  /** 图文来源列出的图片及已声明实况资源是否已获取；与无水印状态独立。 */
+  imagesComplete?: boolean
   /** complete 表示满足现有策略条件，不是对上游资源完整性的独立证明。 */
   parseStatus?: 'complete' | 'unverified'
   parseReason?: 'complete' | 'exhausted' | 'timeout'

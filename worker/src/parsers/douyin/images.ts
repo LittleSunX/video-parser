@@ -4,6 +4,7 @@ import { normalizeUrl, extractFirstUrl, toPlayableUrl } from './text'
 
 // 身份信息只在解析期间使用，不暴露在 API 中。
 const identities = new WeakMap<ImageAsset, Set<string>>()
+const declaredLivePhotos = new WeakSet<ImageAsset>()
 
 function keys(asset: ImageAsset): Set<string> {
   return new Set([
@@ -23,6 +24,8 @@ export function mergeImageAssets(first: ImageAsset[], second: ImageAsset[]): Ima
       continue
     }
     const existing = matches[0]
+    const expectsLivePhoto =
+      declaredLivePhotos.has(asset) || matches.some((entry) => declaredLivePhotos.has(entry))
     let merged = existing
     for (const incoming of [...matches.slice(1), asset]) {
       const preferIncoming =
@@ -36,6 +39,7 @@ export function mergeImageAssets(first: ImageAsset[], second: ImageAsset[]): Ima
     }
     for (const entry of matches) for (const key of keys(entry)) identity.add(key)
     identities.set(merged, identity)
+    if (expectsLivePhoto) declaredLivePhotos.add(merged)
     result[result.indexOf(existing)] = merged
     for (const entry of matches.slice(1)) result.splice(result.indexOf(entry), 1)
   }
@@ -75,6 +79,8 @@ export function extractImageAssets(input: unknown): ImageAsset[] {
     }
     const uri = extractUri(object)
     if (uri) identities.set(asset, new Set(['uri:' + uri]))
+    if (object.video || object.video_play_addr || object.video_download_addr)
+      declaredLivePhotos.add(asset)
     assets.push(asset)
   }
 
@@ -186,7 +192,14 @@ export function isHighConfidenceImageResult(result: ParsedMediaResult): boolean 
   const images = result.video.images ?? []
   if (images.length === 0) return false
   const allClean = images.every((image) => !!image.url && image.watermarkFree)
-  return allClean && result.imagesComplete
+  return allClean && result.imagesComplete && hasAllImageResources(images)
+}
+
+export function hasAllImageResources(images: ImageAsset[]): boolean {
+  return (
+    images.length > 0 &&
+    images.every((image) => !!image.url && (!declaredLivePhotos.has(image) || !!image.livePhotoUrl))
+  )
 }
 
 export function extractLivePhotoUrl(image: Record<string, unknown>): string | undefined {

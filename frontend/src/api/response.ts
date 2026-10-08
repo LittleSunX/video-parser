@@ -52,6 +52,15 @@ export async function readVideoResponse(
   ) {
     throw new Error('作品信息不完整，请重新解析')
   }
+  const images = data.images as VideoInfo['images']
+  if (
+    data.imagesComplete !== undefined &&
+    (typeof data.imagesComplete !== 'boolean' ||
+      data.mediaType !== 'image' ||
+      (data.imagesComplete && (!images?.length || !images.every((image) => image.url.trim()))))
+  ) {
+    throw new Error('作品资源状态异常，请重新解析')
+  }
   if (
     (data.parseStatus !== undefined || data.parseReason !== undefined) &&
     !(

@@ -12,6 +12,7 @@ const {
   canSubmit,
   livePhotoCount,
   parseWarning,
+  imageQualityNotice,
   handleParse,
   cancelParse,
   handleClear,
@@ -175,6 +176,7 @@ function platformName(platform: VideoInfo['platform']) {
           <template v-if="livePhotoCount > 0"> · {{ livePhotoCount }} 个动态实况</template>
         </p>
         <p v-if="video.musicTitle" class="meta">背景音乐：{{ video.musicTitle }}</p>
+        <p v-if="imageQualityNotice" class="download-tip" role="status">{{ imageQualityNotice }}</p>
 
         <div class="actions">
           <button

@@ -29,7 +29,7 @@ export interface DouyinItem {
   }
 }
 
-/** 内部策略结果，完整性元数据不会进入 API 响应。 */
+/** 内部策略结果；由策略选择器汇总完整性后写入 API 响应。 */
 export interface ParsedMediaResult {
   video: VideoInfo
   imagesComplete: boolean
