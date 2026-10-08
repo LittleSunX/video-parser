@@ -2,6 +2,7 @@
 import type { VideoInfo } from './types/video'
 import { formatDuration } from './utils/duration'
 import { useVideoPage } from './composables/useVideoPage'
+import MediaDownloadStatus from './components/MediaDownloadStatus.vue'
 const {
   input,
   loading,
@@ -33,13 +34,13 @@ const {
   cancelVideoDownload,
   handleOpenVideoLink,
   handleProxyDownloadVideo,
-  handleDownloadCover,
+  coverDownload,
   handleDownloadImage,
   handleDownloadLivePhoto,
   handleDownloadAllPreferred,
   handleDownloadAllOriginals,
   stopBatchDownload,
-  handleDownloadMusic,
+  musicDownload,
 } = useVideoPage()
 function platformName(platform: VideoInfo['platform']) {
   const names: Record<VideoInfo['platform'], string> = {
@@ -247,17 +248,19 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'video' && video.cover"
             class="secondary-button"
             type="button"
-            @click="handleDownloadCover"
+            :disabled="coverDownload.downloading"
+            @click="coverDownload.start"
           >
-            下载封面
+            {{ coverDownload.downloading ? '正在下载封面…' : '下载封面' }}
           </button>
           <button
             v-if="video.musicUrl"
             class="secondary-button"
             type="button"
-            @click="handleDownloadMusic"
+            :disabled="musicDownload.downloading"
+            @click="musicDownload.start"
           >
-            下载背景音乐
+            {{ musicDownload.downloading ? '正在下载背景音乐…' : '下载背景音乐' }}
           </button>
           <a
             class="secondary-button"
@@ -267,6 +270,19 @@ function platformName(platform: VideoInfo['platform']) {
             >查看原页面</a
           >
         </div>
+
+        <MediaDownloadStatus
+          label="封面"
+          :download="coverDownload"
+          :can-reparse="canSubmit"
+          @reparse="handleParse"
+        />
+        <MediaDownloadStatus
+          label="背景音乐"
+          :download="musicDownload"
+          :can-reparse="canSubmit"
+          @reparse="handleParse"
+        />
 
         <p v-if="video.mediaType === 'image'" class="download-tip">
           批量下载保存为 ZIP，每包媒体内容最多 128 MB，超出会分包保存；单个文件超过 128 MB

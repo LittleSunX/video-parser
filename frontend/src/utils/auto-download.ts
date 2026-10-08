@@ -4,14 +4,22 @@ const MAX_BUFFER_BYTES = 64 * 1024 * 1024
 interface DownloadOptions {
   signal: AbortSignal
   totalTimeoutMs?: number
+  responseTimeoutMs?: number
+  readTimeoutMs?: number
   onProgress: (received: number, total?: number) => void
 }
 
 /** 受限读取媒体内容，支持取消、超时和大小限制。 */
 export async function fetchMediaBlob(
   url: string,
-  { signal, onProgress, totalTimeoutMs = 120000 }: DownloadOptions,
-  kind: 'video' | 'image' = 'video',
+  {
+    signal,
+    onProgress,
+    totalTimeoutMs = 120000,
+    responseTimeoutMs = 8000,
+    readTimeoutMs = 15000,
+  }: DownloadOptions,
+  kind: 'video' | 'image' | 'audio' = 'video',
   maxBytes = MAX_BUFFER_BYTES,
 ): Promise<Blob> {
   const controller = new AbortController()
@@ -21,10 +29,13 @@ export async function fetchMediaBlob(
   let idleTimer: ReturnType<typeof setTimeout> | undefined
   const resetIdleTimer = (milliseconds: number) => {
     clearTimeout(idleTimer)
-    idleTimer = setTimeout(
-      () => controller.abort(new MediaDownloadError('TIMEOUT', '下载响应超时，请重试')),
-      milliseconds,
-    )
+    idleTimer =
+      milliseconds > 0
+        ? setTimeout(
+            () => controller.abort(new MediaDownloadError('TIMEOUT', '下载响应超时，请重试')),
+            milliseconds,
+          )
+        : undefined
   }
   const totalTimer =
     totalTimeoutMs > 0
@@ -35,7 +46,7 @@ export async function fetchMediaBlob(
       : undefined
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   try {
-    resetIdleTimer(8000)
+    resetIdleTimer(responseTimeoutMs)
     const response = await fetch(url, {
       mode: 'cors',
       credentials: 'omit',
@@ -60,7 +71,7 @@ export async function fetchMediaBlob(
     const chunks: BlobPart[] = []
     let received = 0
     while (true) {
-      resetIdleTimer(15000)
+      resetIdleTimer(readTimeoutMs)
       const { value, done } = await reader.read()
       controller.signal.throwIfAborted()
       if (done) break

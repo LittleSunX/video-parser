@@ -10,6 +10,7 @@ import { MediaDownloadError } from '../utils/download-error'
 import { ref, onScopeDispose, type Ref } from 'vue'
 import type { VideoInfo } from '../types/video'
 import { downloadDirectVideo } from '../utils/auto-download'
+import { useFileDownload } from './useFileDownload'
 import {
   buildCoverFilename,
   buildImageFilename,
@@ -25,6 +26,28 @@ export function useMediaDownloads(
   video: Ref<VideoInfo | null>,
   showNotice: (message: string, duration?: number) => void,
 ) {
+  const coverDownload = useFileDownload({
+    label: '封面',
+    kind: 'image',
+    getTarget: () => {
+      const current = video.value
+      return current?.cover
+        ? { url: current.cover, filename: buildCoverFilename(current) }
+        : undefined
+    },
+    showNotice,
+  })
+  const musicDownload = useFileDownload({
+    label: '背景音乐',
+    kind: 'audio',
+    getTarget: () => {
+      const current = video.value
+      return current?.musicUrl
+        ? { url: current.musicUrl, filename: buildMusicFilename(current) }
+        : undefined
+    },
+    showNotice,
+  })
   const batchDownloading = ref(false)
   const batchProgress = ref('')
   const batchItems = ref<BatchItemStatus[]>([])
@@ -145,11 +168,6 @@ export function useMediaDownloads(
   function handleProxyDownloadVideo() {
     if (!video.value?.videoUrl || videoDownloading.value) return
     startNativeDownload(video.value.videoUrl, buildVideoFilename(video.value), '已发起备用下载')
-  }
-
-  function handleDownloadCover() {
-    if (!video.value?.cover) return
-    startNativeDownload(video.value.cover, buildCoverFilename(video.value), '已发起封面下载')
   }
 
   function handleDownloadImage(index: number) {
@@ -297,12 +315,6 @@ export function useMediaDownloads(
     if (batchCanRetry.value) return handleBatchDownload(batchPreferLive)
   }
 
-  function handleDownloadMusic() {
-    const current = video.value
-    if (!current?.musicUrl) return
-    startNativeDownload(current.musicUrl, buildMusicFilename(current), '已发起背景音乐下载')
-  }
-
   window.addEventListener?.('pagehide', stopBatchDownload)
   window.addEventListener?.('pagehide', stopNativeDownloads)
   onScopeDispose(() => {
@@ -331,12 +343,12 @@ export function useMediaDownloads(
     cancelVideoDownload,
     handleOpenVideoLink,
     handleProxyDownloadVideo,
-    handleDownloadCover,
+    coverDownload,
     handleDownloadImage,
     handleDownloadLivePhoto,
     handleDownloadAllPreferred,
     handleDownloadAllOriginals,
     stopBatchDownload,
-    handleDownloadMusic,
+    musicDownload,
   }
 }
