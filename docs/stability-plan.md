@@ -40,6 +40,7 @@
 - `parse_selection`：结束原因 `complete`、`exhausted`、`timeout` 或 `cancelled`。`complete` 表示满足现有策略选择条件，不是对上游作品完整性的独立证明。
 - `parse_result`：最终静态图片、实况视频、普通视频数量。通过请求编号关联到前面的策略事件。
 - 应用新增日志不记录原始分享文案、作品标题、完整 URL、签名参数、IP 或原始异常。Cloudflare 平台自身的访问日志有独立采集配置；不要把包含下载 query 的完整平台日志公开转发。
+- `Server-Timing` 暴露固定的 `worker`、`resolve`、`primary` 毫秒数，可从响应头读取。`worker` 为包含内部阶段的总耗时，不能将三个指标相加。该计时不读取或缓冲媒体响应流。
 - 后端版本来自 [Cloudflare Version Metadata](https://developers.cloudflare.com/workers/runtime-apis/bindings/version-metadata/)。缺少绑定时显示 `unknown`，不冒充生产版本。版本标签需部署者显式设置；标签缺失不影响版本 ID。
 - 前端 `version.json` 优先使用构建环境的 `VERCEL_GIT_COMMIT_SHA`，否则读取 Git HEAD；无法取得时返回 `unknown`。本地含未提交修改时，commit 只标识 HEAD，不代表工作区完全一致。
 - 本轮不新增第三方埋点或后台定时采集。响应流中途失败和手机保存失败仍需下载器状态、网络面板及人工复现补充判断。

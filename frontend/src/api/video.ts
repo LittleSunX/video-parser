@@ -4,6 +4,7 @@ import { readVideoResponse } from './response'
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
 export async function parseVideo(input: string, signal?: AbortSignal): Promise<VideoInfo> {
+  const started = performance.now()
   let response: Response
   try {
     const form = new URLSearchParams({ url: input })
@@ -32,6 +33,16 @@ export async function parseVideo(input: string, signal?: AbortSignal): Promise<V
   } catch {
     signal?.throwIfAborted()
     throw new Error('网络连接失败，请检查网络后重试')
+  }
+  if (import.meta.env.DEV) {
+    // 只输出耗时与固定服务端指标，不记录分享文案或媒体地址。
+    console.debug(
+      'parse_timing',
+      JSON.stringify({
+        durationMs: Math.round(performance.now() - started),
+        serverTiming: response.headers.get('Server-Timing'),
+      }),
+    )
   }
   try {
     return await readVideoResponse(response, signal)
