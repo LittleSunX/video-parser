@@ -22,7 +22,7 @@ export async function parseVideo(input: string, signal?: AbortSignal): Promise<V
     signal?.throwIfAborted()
     const requestId = response.headers.get('X-Request-ID')
     if (error instanceof Error && requestId && /^[0-9a-f-]{36}$/i.test(requestId)) {
-      throw new Error(error.message + '（请求编号：' + requestId + '）')
+      throw new Error(error.message + '（请求编号：' + requestId + '）', { cause: error })
     }
     throw error
   }
