@@ -21,6 +21,9 @@ export interface VideoInfo {
   images?: ImageAsset[]
   musicUrl?: string
   musicTitle?: string
+  /** complete 表示满足现有策略条件，不是对上游资源完整性的独立证明。 */
+  parseStatus?: 'complete' | 'unverified'
+  parseReason?: 'complete' | 'exhausted' | 'timeout'
 }
 
 export interface ApiError {

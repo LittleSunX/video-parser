@@ -403,6 +403,55 @@ test('frontend parse timeout releases loading state and allows retry', async () 
   assert.equal(app.canSubmit.value, true)
 })
 
+test('partial parse results remain available with a persistent warning until a complete retry', async () => {
+  const partial = {
+    mediaType: 'image',
+    images: [{ url: 'https://image/1' }],
+    parseStatus: 'unverified',
+    parseReason: 'timeout',
+  }
+  const { app } = createApp(async () => partial)
+  app.input.value = url
+  await app.handleParse()
+  assert.equal(app.video.value.images.length, 1)
+  assert.match(app.parseWarning.value, /超时/)
+  assert.match(app.notice.value, /完整性尚未确认/)
+  vi.mocked(apiParseVideo).mockResolvedValue({
+    ...partial,
+    parseStatus: 'complete',
+    parseReason: 'complete',
+  })
+  await app.handleParse()
+  assert.equal(app.parseWarning.value, '')
+  assert.match(app.notice.value, /图文解析成功/)
+})
+
+test('native download failure offers reparse and stale failures cannot replace newer state', () => {
+  const { app } = createApp()
+  const callbacks = []
+  const dispose = vi.fn()
+  vi.mocked(triggerDownload).mockImplementation((_url, _filename, onError) => {
+    callbacks.push(onError)
+    return dispose
+  })
+  app.video.value = { videoUrl: 'https://cdn/video.mp4' }
+  app.handleProxyDownloadVideo()
+  callbacks[0]({ code: 'MEDIA_UNAVAILABLE', message: '资源失效，请重新解析' })
+  assert.equal(app.downloadState.value, 'failed')
+  assert.equal(app.downloadNeedsReparse.value, true)
+  app.handleProxyDownloadVideo()
+  callbacks[0]({ code: 'MEDIA_UNAVAILABLE', message: '旧错误' })
+  assert.equal(app.downloadState.value, 'fallback')
+  callbacks[1]({ code: 'RATE_LIMITED', message: '等待 60 秒' })
+  assert.equal(app.downloadNeedsReparse.value, false)
+  assert.equal(app.downloadStatus.value, '等待 60 秒')
+  app.handleProxyDownloadVideo()
+  app.handleClear()
+  assert.equal(dispose.mock.calls.length, 1)
+  callbacks[2]({ code: 'MEDIA_UNAVAILABLE', message: '清空后的旧错误' })
+  assert.equal(app.downloadStatus.value, '')
+})
+
 test('a partial image list does not prevent fallback from recovering missing images', async () => {
   let calls = 0
   global.fetch = async () => {

@@ -39,9 +39,49 @@ export function useMediaDownloads(
   let batchPreferLive = true
   const videoDownloading = ref(false)
   const downloadStatus = ref('')
-  const downloadState = ref<'receiving' | 'handed-off' | 'fallback' | 'cancelled'>('receiving')
+  const downloadState = ref<'receiving' | 'handed-off' | 'fallback' | 'cancelled' | 'failed'>(
+    'receiving',
+  )
+  const downloadNeedsReparse = ref(false)
+  const nativeDownloads = new Set<() => void>()
+  let nativeRequestNumber = 0
   let downloadController: AbortController | undefined
   let batchController: AbortController | undefined
+
+  function startNativeDownload(url: string, filename: string, message: string) {
+    const current = video.value
+    const requestNumber = ++nativeRequestNumber
+    downloadNeedsReparse.value = false
+    downloadState.value = 'fallback'
+    downloadStatus.value = message + '，请查看浏览器下载列表。'
+    showNotice(downloadStatus.value, 6000)
+    let dispose: (() => void) | undefined
+    try {
+      dispose = triggerDownload(url, filename, (error) => {
+        if (dispose) nativeDownloads.delete(dispose)
+        if (video.value !== current || requestNumber !== nativeRequestNumber) return
+        downloadState.value = 'failed'
+        downloadStatus.value = error.message
+        downloadNeedsReparse.value = [
+          'MEDIA_UNAVAILABLE',
+          'INVALID_URL',
+          'DOWNLOAD_FAILED',
+        ].includes(error.code)
+        showNotice(error.message, 6000)
+      })
+      if (typeof dispose === 'function') nativeDownloads.add(dispose)
+    } catch {
+      downloadState.value = 'failed'
+      downloadStatus.value = '未能发起下载，请重试。'
+      showNotice(downloadStatus.value)
+    }
+  }
+
+  function stopNativeDownloads() {
+    nativeRequestNumber++
+    for (const dispose of nativeDownloads) dispose()
+    nativeDownloads.clear()
+  }
 
   async function handleCopyVideoUrl() {
     if (!video.value?.videoUrl) return
@@ -60,6 +100,7 @@ export function useMediaDownloads(
     downloadController = controller
     videoDownloading.value = true
     downloadState.value = 'receiving'
+    downloadNeedsReparse.value = false
     downloadStatus.value = '正在连接下载…'
     try {
       await downloadDirectVideo(current.videoUrl, buildVideoFilename(current), {
@@ -77,10 +118,7 @@ export function useMediaDownloads(
       showNotice('视频已交给浏览器保存，请查看下载列表', 6000)
     } catch {
       if (controller.signal.aborted || downloadController !== controller) return
-      triggerDownload(current.videoUrl, buildVideoFilename(current))
-      downloadState.value = 'fallback'
-      showNotice('已切换备用下载，请查看浏览器下载列表', 6000)
-      downloadStatus.value = '已切换到备用下载，请查看浏览器下载列表；速度较慢时可使用“打开直链”。'
+      startNativeDownload(current.videoUrl, buildVideoFilename(current), '已切换到备用下载')
     } finally {
       if (downloadController === controller) {
         downloadController = undefined
@@ -90,6 +128,8 @@ export function useMediaDownloads(
   }
 
   function cancelVideoDownload() {
+    stopNativeDownloads()
+    downloadNeedsReparse.value = false
     downloadController?.abort()
     downloadController = undefined
     videoDownloading.value = false
@@ -104,24 +144,21 @@ export function useMediaDownloads(
 
   function handleProxyDownloadVideo() {
     if (!video.value?.videoUrl || videoDownloading.value) return
-    triggerDownload(video.value.videoUrl, buildVideoFilename(video.value))
-    downloadState.value = 'fallback'
-    downloadStatus.value = '已发起备用下载，请查看浏览器下载列表。'
-    showNotice('已发起备用下载，请查看浏览器下载列表', 6000)
+    startNativeDownload(video.value.videoUrl, buildVideoFilename(video.value), '已发起备用下载')
   }
 
   function handleDownloadCover() {
     if (!video.value?.cover) return
-    triggerDownload(video.value.cover, buildCoverFilename(video.value))
-    showNotice('已发起封面下载')
+    startNativeDownload(video.value.cover, buildCoverFilename(video.value), '已发起封面下载')
   }
 
   function handleDownloadImage(index: number) {
     const current = video.value
     const asset = current?.images?.[index]
     if (!current || !asset?.url) return
-    triggerDownload(asset.url, buildImageFilename(current, index))
-    showNotice(
+    startNativeDownload(
+      asset.url,
+      buildImageFilename(current, index),
       asset.watermarkFree
         ? '已发起第 ' + (index + 1) + ' 张无水印原图下载'
         : '已发起第 ' + (index + 1) + ' 张高清原图下载',
@@ -132,8 +169,11 @@ export function useMediaDownloads(
     const current = video.value
     const asset = current?.images?.[index]
     if (!current || !asset?.livePhotoUrl) return
-    triggerDownload(asset.livePhotoUrl, buildLivePhotoFilename(current, index))
-    showNotice('已发起第 ' + (index + 1) + ' 个实况视频下载')
+    startNativeDownload(
+      asset.livePhotoUrl,
+      buildLivePhotoFilename(current, index),
+      '已发起第 ' + (index + 1) + ' 个实况视频下载',
+    )
   }
 
   function handleDownloadAllPreferred() {
@@ -260,13 +300,14 @@ export function useMediaDownloads(
   function handleDownloadMusic() {
     const current = video.value
     if (!current?.musicUrl) return
-    triggerDownload(current.musicUrl, buildMusicFilename(current))
-    showNotice('已发起背景音乐下载')
+    startNativeDownload(current.musicUrl, buildMusicFilename(current), '已发起背景音乐下载')
   }
 
   window.addEventListener?.('pagehide', stopBatchDownload)
+  window.addEventListener?.('pagehide', stopNativeDownloads)
   onScopeDispose(() => {
     window.removeEventListener?.('pagehide', stopBatchDownload)
+    window.removeEventListener?.('pagehide', stopNativeDownloads)
     stopBatchDownload()
     cancelVideoDownload()
   })
@@ -284,6 +325,7 @@ export function useMediaDownloads(
     videoDownloading,
     downloadStatus,
     downloadState,
+    downloadNeedsReparse,
     handleCopyVideoUrl,
     handleDownloadVideo,
     cancelVideoDownload,

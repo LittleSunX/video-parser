@@ -9,6 +9,7 @@ import { jsonResponse, notFoundResponse, optionsResponse } from './utils/respons
 import { enforceRateLimit, type Env } from './utils/rate-limit'
 import { readParseInput } from './utils/parse-input'
 import { errorResponse } from './utils/error-response'
+import { downloadErrorPage } from './utils/download-error-page'
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -129,7 +130,11 @@ async function handleDownload(
     })
   } catch (error) {
     trace.emit('request_error', { code: errorCode(error) })
-    return errorResponse(error, 'download')
+    const response = errorResponse(error, 'download')
+    const token = requestUrl.searchParams.get('errorToken') ?? ''
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token))
+      return downloadErrorPage(response, token, trace)
+    return response
   }
 }
 

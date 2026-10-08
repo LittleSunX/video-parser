@@ -210,4 +210,24 @@ test('frontend rejects malformed payloads and preserves useful API error message
     videoUrl: 'https://v.douyinvod.com/video.mp4',
   }
   assert.deepEqual(await readVideoResponse(Response.json({ success: true, data: valid })), valid)
+  for (const state of [
+    { parseStatus: 'complete', parseReason: 'complete' },
+    { parseStatus: 'unverified', parseReason: 'timeout' },
+    { parseStatus: 'unverified', parseReason: 'exhausted' },
+  ]) {
+    const data = { ...valid, ...state }
+    assert.deepEqual(await readVideoResponse(Response.json({ success: true, data })), data)
+  }
+  for (const state of [
+    { parseStatus: 'complete', parseReason: 'timeout' },
+    { parseStatus: 'unverified', parseReason: 'complete' },
+    { parseStatus: 'complete' },
+    { parseReason: 'exhausted' },
+    { parseStatus: 'unexpected', parseReason: 'unexpected' },
+  ]) {
+    await assert.rejects(
+      readVideoResponse(Response.json({ success: true, data: { ...valid, ...state } })),
+      /解析状态异常/,
+    )
+  }
 })

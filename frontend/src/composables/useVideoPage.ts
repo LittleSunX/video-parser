@@ -17,6 +17,12 @@ export function useVideoPage() {
   const livePhotoCount = computed(
     () => video.value?.images?.filter((image) => !!image.livePhotoUrl).length ?? 0,
   )
+  const parseWarning = computed(() => {
+    if (video.value?.parseStatus !== 'unverified') return ''
+    return video.value.parseReason === 'timeout'
+      ? '解析等待超时，已保留获取到的资源；资源可能不完整，可重新解析尝试补齐。'
+      : '已尝试所有解析方式，资源完整性尚未确认；可下载已有资源或重新解析。'
+  })
 
   async function handleParse() {
     if (!canSubmit.value) return
@@ -38,7 +44,9 @@ export function useVideoPage() {
       const result = await parseVideo(input.value.trim(), controller.signal)
       if (parseController !== controller || controller.signal.aborted) return
       video.value = result
-      if (video.value.mediaType === 'image' && livePhotoCount.value > 0) {
+      if (parseWarning.value) {
+        showNotice('已获取可用资源，完整性尚未确认', 6000)
+      } else if (video.value.mediaType === 'image' && livePhotoCount.value > 0) {
         showNotice('实况图文解析成功')
       } else {
         showNotice(video.value.mediaType === 'image' ? '图文解析成功' : '视频解析成功')
@@ -90,6 +98,7 @@ export function useVideoPage() {
     notice,
     canSubmit,
     livePhotoCount,
+    parseWarning,
     handleParse,
     cancelParse,
     handleClear,
