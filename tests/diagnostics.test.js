@@ -154,7 +154,7 @@ test('partial image fallback logs exhaustion instead of claiming complete select
     undefined,
     { requestId: 'test', version: 'test', emit },
   )
-  expect(result).toBe(partial)
+  expect(result).toEqual({ ...partial, parseStatus: 'unverified', parseReason: 'exhausted' })
   expect(emit).toHaveBeenCalledWith(
     'parse_selection',
     expect.objectContaining({

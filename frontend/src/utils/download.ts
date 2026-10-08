@@ -1,5 +1,10 @@
 import type { VideoInfo } from '../types/video'
 
+export interface NativeDownloadError {
+  code: string
+  message: string
+}
+
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
 export function buildVideoFilename(video: VideoInfo): string {
@@ -68,15 +73,54 @@ export function buildDownloadUrl(url: string, filename: string): string {
   )
 }
 
-export function triggerDownload(url: string, filename: string): void {
-  const downloadUrl = buildDownloadUrl(url, filename)
-  const anchor = document.createElement('a')
-  anchor.href = downloadUrl
-  anchor.download = filename
-
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
+export function triggerDownload(
+  url: string,
+  filename: string,
+  onError: (error: NativeDownloadError) => void = () => {},
+): () => void {
+  const token = crypto.randomUUID()
+  const downloadUrl = new URL(buildDownloadUrl(url, filename), window.location.href)
+  downloadUrl.searchParams.set('errorToken', token)
+  const frame = document.createElement('iframe')
+  frame.hidden = true
+  frame.title = '媒体下载'
+  frame.referrerPolicy = 'no-referrer'
+  const cleanup = () => {
+    window.removeEventListener('message', receiveError)
+    frame.remove()
+  }
+  const receiveError = (event: MessageEvent) => {
+    if (event.origin !== downloadUrl.origin || event.source !== frame.contentWindow) return
+    const data = event.data
+    if (
+      !data ||
+      data.type !== 'video-parser-download-error' ||
+      data.token !== token ||
+      typeof data.message !== 'string' ||
+      data.message.length > 300 ||
+      typeof data.code !== 'string' ||
+      !/^[A-Z_]{1,64}$/.test(data.code)
+    )
+      return
+    let message = data.message
+    const seconds = Number(data.retryAfter)
+    if (data.code === 'RATE_LIMITED' && Number.isFinite(seconds) && seconds > 0)
+      message = '请求过于频繁，请等待约 ' + Math.ceil(Math.min(seconds, 3600)) + ' 秒后重试'
+    if (typeof data.requestId === 'string' && /^[0-9a-f-]{36}$/i.test(data.requestId))
+      message += '（请求编号：' + data.requestId + '）'
+    cleanup()
+    onError({ code: data.code, message })
+  }
+  window.addEventListener('message', receiveError)
+  try {
+    frame.src = downloadUrl.toString()
+    document.body.appendChild(frame)
+  } catch (error) {
+    cleanup()
+    throw error
+  }
+  // 成功下载交由浏览器管理；框架保留至结果清理，避免中途拆除打断传输。
+  return cleanup
 }
 
 function buildFilename(video: VideoInfo, extension: string, suffix?: string): string {

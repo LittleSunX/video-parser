@@ -28,7 +28,7 @@ test('fast complete primary avoids all backup requests', async () => {
       { name: 'primary', run: async () => result },
       { name: 'backup', run: backup },
     ]),
-  ).toBe(result.video)
+  ).toEqual({ ...result.video, parseStatus: 'complete', parseReason: 'complete' })
   expect(backup).not.toHaveBeenCalled()
 })
 
@@ -153,6 +153,8 @@ test('shorter clean result cannot replace a longer known image list at exhaustio
     full.video.images.map((image, i) => ({ ...image, watermarkFree: i < 2 })),
   )
   expect(result.images).toHaveLength(3)
+  expect(result.parseStatus).toBe('unverified')
+  expect(result.parseReason).toBe('exhausted')
 })
 
 test('longer result replaces an earlier partial clean list despite its lower quality score', async () => {
@@ -203,4 +205,57 @@ test('shared timeout returns the longer list after seeing a shorter clean fallba
   expect(result.images).toEqual(
     full.video.images.map((image, i) => ({ ...image, watermarkFree: i < 2 })),
   )
+  expect(result.parseStatus).toBe('unverified')
+  expect(result.parseReason).toBe('timeout')
+})
+
+test('fallback supplements missing metadata without losing known live tracks', async () => {
+  const primary = imageResult(false)
+  const backup = imageResult()
+  Object.assign(primary.video, { title: 'primary title', musicTitle: 'orphan title' })
+  Object.assign(backup.video, {
+    author: 'author',
+    cover: 'https://images/cover.jpg',
+    musicUrl: 'https://audio/music.mp3',
+    musicTitle: 'matching title',
+  })
+  backup.video.images.forEach((image) => {
+    delete image.livePhotoUrl
+  })
+  const result = await runParseStrategies([
+    { name: 'primary', run: async () => primary },
+    { name: 'backup', run: async () => backup },
+  ])
+  expect(result).toMatchObject({
+    title: 'primary title',
+    author: 'author',
+    cover: 'https://images/cover.jpg',
+    musicUrl: 'https://audio/music.mp3',
+    musicTitle: 'matching title',
+  })
+  expect(result.images.every((image) => image.livePhotoUrl && image.watermarkFree)).toBe(true)
+})
+
+test('a different fallback music title is not paired with the primary music URL', async () => {
+  const primary = imageResult(false)
+  const backup = imageResult()
+  Object.assign(primary.video, {
+    author: 'primary',
+    cover: 'https://images/primary',
+    musicUrl: 'https://audio/primary',
+  })
+  Object.assign(backup.video, {
+    author: 'backup',
+    cover: 'https://images/backup',
+    musicUrl: 'https://audio/backup',
+    musicTitle: 'backup title',
+  })
+  const result = await runParseStrategies([
+    { name: 'primary', run: async () => primary },
+    { name: 'backup', run: async () => backup },
+  ])
+  expect(result.author).toBe('primary')
+  expect(result.cover).toBe('https://images/primary')
+  expect(result.musicUrl).toBe('https://audio/primary')
+  expect(result.musicTitle).toBeUndefined()
 })

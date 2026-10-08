@@ -40,7 +40,12 @@ export function runParseStrategies(
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
       controller.abort()
-      if (video) resolve(video)
+      if (video)
+        resolve({
+          ...video,
+          parseStatus: reason === 'complete' ? 'complete' : 'unverified',
+          parseReason: reason === 'cancelled' ? 'exhausted' : reason,
+        })
       else reject(error)
     }
 
@@ -68,6 +73,7 @@ export function runParseStrategies(
         finish(video)
         return
       }
+      if (bestImage) bestImage = mergeMetadata(bestImage, video)
       if (!video.images?.length) return
       if (!bestImage) bestImage = video
       else {
@@ -143,4 +149,22 @@ export function runParseStrategies(
         'exhausted',
       )
   })
+}
+
+function mergeMetadata(current: VideoInfo, incoming: VideoInfo): VideoInfo {
+  // 音乐地址和标题作为一组补充，避免把不同接口的两首音乐配在一起。
+  const musicTitle =
+    !current.musicUrl && incoming.musicUrl
+      ? incoming.musicTitle
+      : current.musicTitle ||
+        (!incoming.musicUrl || incoming.musicUrl === current.musicUrl
+          ? incoming.musicTitle
+          : undefined)
+  return {
+    ...current,
+    author: current.author || incoming.author,
+    cover: current.cover || incoming.cover,
+    musicUrl: current.musicUrl || incoming.musicUrl,
+    musicTitle,
+  }
 }

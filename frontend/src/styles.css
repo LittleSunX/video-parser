@@ -217,6 +217,12 @@ a {
   background: #fff8f8;
 }
 
+.warning-card {
+  border-color: #fde68a;
+  color: #92400e;
+  background: #fffbeb;
+}
+
 .result-card {
   display: grid;
   grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
@@ -563,6 +569,12 @@ a {
   border-color: #e2e8f0;
   background: #f8fafc;
   color: #475569;
+}
+
+.download-status-failed {
+  border-color: #ffd4d4;
+  color: #a83d3d;
+  background: #fff8f8;
 }
 
 .disclaimer {

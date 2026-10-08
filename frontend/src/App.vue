@@ -10,6 +10,7 @@ const {
   notice,
   canSubmit,
   livePhotoCount,
+  parseWarning,
   handleParse,
   cancelParse,
   handleClear,
@@ -26,6 +27,7 @@ const {
   videoDownloading,
   downloadStatus,
   downloadState,
+  downloadNeedsReparse,
   handleCopyVideoUrl,
   handleDownloadVideo,
   cancelVideoDownload,
@@ -99,6 +101,14 @@ function platformName(platform: VideoInfo['platform']) {
     <section v-if="errorMessage" class="message-card error-card" role="alert">
       <strong>解析失败</strong>
       <span>{{ errorMessage }}</span>
+    </section>
+
+    <section v-if="parseWarning" class="message-card warning-card" role="status">
+      <strong>资源完整性尚未确认</strong>
+      <span>{{ parseWarning }}</span>
+      <button class="secondary-button" type="button" :disabled="!canSubmit" @click="handleParse">
+        重新解析尝试补齐
+      </button>
     </section>
 
     <section
@@ -312,17 +322,27 @@ function platformName(platform: VideoInfo['platform']) {
           小作品自动保存一包；大作品请逐包点击保存，再继续下一包。中途失败可重试未完成项，实际保存状态请查看浏览器下载列表。
         </p>
         <div
-          v-if="video.mediaType === 'video' && downloadStatus"
+          v-if="downloadStatus"
           class="download-status"
           :class="'download-status-' + downloadState"
           role="status"
           aria-live="polite"
         >
           <strong v-if="downloadState === 'handed-off'">✓ 视频已交给浏览器保存</strong>
-          <strong v-else-if="downloadState === 'fallback'">已发起备用下载</strong>
+          <strong v-else-if="downloadState === 'fallback'">已发起下载</strong>
+          <strong v-else-if="downloadState === 'failed'">下载失败</strong>
           <strong v-else-if="downloadState === 'cancelled'">下载已取消</strong>
           <strong v-else>正在下载视频</strong>
           <span>{{ downloadStatus }}</span>
+          <button
+            v-if="downloadNeedsReparse"
+            class="secondary-button"
+            type="button"
+            :disabled="!canSubmit"
+            @click="handleParse"
+          >
+            重新解析后下载
+          </button>
         </div>
         <p v-if="video.mediaType === 'video'" class="download-tip">
           点击下载后请保持页面打开，接收完成会自动请求保存。若浏览器未保存，可使用备用下载；打开直链则需从播放器菜单手动保存。

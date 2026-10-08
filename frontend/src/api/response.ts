@@ -52,5 +52,15 @@ export async function readVideoResponse(
   ) {
     throw new Error('作品信息不完整，请重新解析')
   }
+  if (
+    (data.parseStatus !== undefined || data.parseReason !== undefined) &&
+    !(
+      (data.parseStatus === 'complete' && data.parseReason === 'complete') ||
+      (data.parseStatus === 'unverified' &&
+        (data.parseReason === 'timeout' || data.parseReason === 'exhausted'))
+    )
+  ) {
+    throw new Error('作品解析状态异常，请重新解析')
+  }
   return data as unknown as VideoInfo
 }
