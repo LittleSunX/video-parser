@@ -310,6 +310,19 @@ Content-Type: application/json
 
 也可以直接传完整的抖音分享文案。
 
+同时支持 `application/x-www-form-urlencoded`，字段仍为 `url`。网页使用 `URLSearchParams` 提交分享文案，首次跨域解析即可直接 POST，减少一次 OPTIONS 预检；不缓存作品或媒体地址，不改变解析策略、画质、资源数量及作者、封面、音乐等返回信息。
+
+```http
+POST /api/parse
+Content-Type: application/x-www-form-urlencoded;charset=UTF-8
+
+url=https%3A%2F%2Fv.douyin.com%2Fxxxx%2F
+```
+
+两种格式均受 32 KiB 请求体和 5000 字符输入限制，继续执行域名校验与解析限流。表单只接受一个 `url` 字段；字节限制按编码后的请求体计算。网页在表单编码超过请求体上限时直接使用 JSON，避免缩小原有长文案的可提交范围。
+
+发布时先更新 Worker，再更新前端。旧 JSON 调用保持兼容；新前端连接旧 Worker 收到 HTTP 415 时，仅回退一次 JSON 请求，其他错误不自动重复解析。只有前后端都更新后，普通分享文案的首次解析才能省掉预检。
+
 视频响应示例：
 
 ```json
