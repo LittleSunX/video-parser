@@ -530,7 +530,7 @@ video-parser/
 │  │  └─ main.ts
 │  ├─ .env.example
 │  ├─ package.json
-│  └─ vite.config.ts
+│  └─ vite.config.mjs
 │
 ├─ worker/
 │  ├─ src/
