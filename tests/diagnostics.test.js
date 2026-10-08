@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import worker from '../worker/src/index'
-import { createDiagnostics } from '../worker/src/utils/diagnostics'
+import { createDiagnostics, withDiagnostics } from '../worker/src/utils/diagnostics'
 import { runParseStrategies } from '../worker/src/parsers/douyin/strategies'
 import { parseVideo } from '../frontend/src/api/video'
 import { errorResponse } from '../worker/src/utils/error-response'
@@ -42,8 +42,43 @@ test('health exposes deployment identity and responses preserve CORS headers', a
   expect(response.headers.get('Access-Control-Expose-Headers')).toContain('Retry-After')
   expect(response.headers.get('Access-Control-Expose-Headers')).toContain('X-Request-ID')
   expect(response.headers.get('Cache-Control')).toBe('no-store')
+  expect(response.headers.get('Server-Timing')).toMatch(/^worker;dur=\d+$/)
+  expect(response.headers.get('Access-Control-Expose-Headers')).toContain('Server-Timing')
   const local = await worker.fetch(new Request(api + '/api/health'), {})
   expect((await local.json()).data.version).toBe('unknown')
+})
+
+test('timing headers use fixed metric names and do not consume response streams', async () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {})
+  const trace = createDiagnostics()
+  trace.emit('resolve_complete', { durationMs: 100 })
+  trace.emit('strategy_complete', { strategy: 'web-detail', durationMs: 200 })
+  trace.emit('strategy_complete', { strategy: 'PRIVATE_NAME', durationMs: 300 })
+  trace.emit('request_response', { durationMs: 310 })
+  let reads = 0
+  const stream = new ReadableStream({
+    pull(controller) {
+      reads++
+      controller.enqueue(new Uint8Array([1, 2]))
+      controller.close()
+    },
+  })
+  const response = withDiagnostics(new Response(stream), trace)
+  expect(response.body).toBe(stream)
+  expect(reads).toBe(0)
+  expect(response.headers.get('Server-Timing')).toBe(
+    'resolve;dur=100, primary;dur=200, worker;dur=310',
+  )
+  expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([1, 2])
+})
+
+test('invalid durations and unknown events do not enter timing headers', () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {})
+  const trace = createDiagnostics()
+  trace.emit('resolve_complete', { durationMs: Number.NaN })
+  trace.emit('request_response', { durationMs: -1 })
+  trace.emit('PRIVATE_EVENT', { durationMs: 100 })
+  expect(withDiagnostics(new Response(null), trace).headers.has('Server-Timing')).toBe(false)
 })
 
 test('concurrent parse requests have independent traces without leaking media data', async () => {

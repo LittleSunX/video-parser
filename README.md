@@ -310,6 +310,21 @@ Content-Type: application/json
 
 也可以直接传完整的抖音分享文案。
 
+同时支持 `application/x-www-form-urlencoded`，字段仍为 `url`。网页使用 `URLSearchParams` 提交分享文案，首次跨域解析即可直接 POST，减少一次 OPTIONS 预检；不缓存作品或媒体地址，不改变解析策略、画质、资源数量及作者、封面、音乐等返回信息。
+
+```http
+POST /api/parse
+Content-Type: application/x-www-form-urlencoded;charset=UTF-8
+
+url=https%3A%2F%2Fv.douyin.com%2Fxxxx%2F
+```
+
+两种格式均受 32 KiB 请求体和 5000 字符输入限制，继续执行域名校验与解析限流。表单只接受一个 `url` 字段；字节限制按编码后的请求体计算。网页在表单编码超过请求体上限时直接使用 JSON，避免缩小原有长文案的可提交范围。
+
+发布时先更新 Worker，再更新前端。旧 JSON 调用保持兼容；新前端连接旧 Worker 收到 HTTP 415 时，仅回退一次 JSON 请求，其他错误不自动重复解析。只有前后端都更新后，普通分享文案的首次解析才能省掉预检。
+
+前端配置跨域 HTTPS API 时，页面打开即添加一个 `preconnect` 提示，利用用户粘贴文案前的时间提前建立连接，不提前调用解析接口。浏览器可选择忽略提示，实际收益取决于网络和浏览器；同源 API 不添加该提示。
+
 视频响应示例：
 
 ```json
@@ -443,7 +458,9 @@ GitHub Actions 会在 main 推送和 Pull Request 时，分别在 Windows 与 Li
 
 前端构建后可访问 `/version.json` 查看提交号和构建时间；后端 `/api/health` 返回 Cloudflare 部署版本。API 响应包含 `X-Request-ID` 和 `X-Worker-Version`，解析失败提示会附带可用的请求编号，便于关联策略耗时与资源数量日志。
 
-固定验收样本、手机保存检查清单、诊断字段说明及发布记录模板见 [稳定性验收计划](docs/stability-plan.md)。下载响应成功不代表手机已经保存，真实保存行为需单独验收。
+响应还通过 `Server-Timing` 提供固定的 `worker`、`resolve`、`primary` 耗时（毫秒），便于区分 Worker 内部与外部请求开销，不包含作品信息或媒体地址。`worker` 包含内部各阶段，不能与另外两项再次相加；下载的 `worker` 仅表示响应准备耗时，不代表文件传输或保存完成。开发模式前端可在控制台查看受控的客户端请求计时。
+
+下载响应成功不代表手机已经保存，真实保存行为需单独验收。
 
 ---
 

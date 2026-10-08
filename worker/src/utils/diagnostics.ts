@@ -25,6 +25,7 @@ export interface Diagnostics {
   requestId: string
   version: string
   emit(event: string, fields?: DiagnosticFields): void
+  serverTiming?(): string
 }
 
 export function errorCode(error: unknown): string {
@@ -45,12 +46,32 @@ export function mediaCounts(video: VideoInfo) {
 export function createDiagnostics(metadata?: VersionMetadata): Diagnostics {
   const requestId = crypto.randomUUID()
   const version = metadata?.id && /^[a-zA-Z0-9-]{1,64}$/.test(metadata.id) ? metadata.id : 'unknown'
+  const timings = new Map<string, number>()
   return {
     requestId,
     version,
     emit(event, fields = {}) {
+      const metric =
+        event === 'request_response'
+          ? 'worker'
+          : event === 'resolve_complete'
+            ? 'resolve'
+            : event === 'strategy_complete' && fields.strategy === 'web-detail'
+              ? 'primary'
+              : undefined
+      if (
+        metric &&
+        typeof fields.durationMs === 'number' &&
+        Number.isFinite(fields.durationMs) &&
+        fields.durationMs >= 0
+      ) {
+        timings.set(metric, fields.durationMs)
+      }
       // 仅传入固定事件及计数；禁止记录请求 URL、作品信息和原始异常。
       console.info(JSON.stringify({ event, requestId, version, ...fields }))
+    },
+    serverTiming() {
+      return [...timings].map(([name, duration]) => name + ';dur=' + duration).join(', ')
     },
   }
 }
@@ -59,10 +80,14 @@ export function withDiagnostics(response: Response, trace: Diagnostics): Respons
   const headers = new Headers(response.headers)
   headers.set('X-Request-ID', trace.requestId)
   headers.set('X-Worker-Version', trace.version)
+  const timing = trace.serverTiming?.()
+  if (timing) headers.set('Server-Timing', timing)
   const exposed = headers.get('Access-Control-Expose-Headers')
   headers.set(
     'Access-Control-Expose-Headers',
-    [exposed, 'X-Request-ID', 'X-Worker-Version'].filter(Boolean).join(', '),
+    [exposed, 'X-Request-ID', 'X-Worker-Version', timing ? 'Server-Timing' : undefined]
+      .filter(Boolean)
+      .join(', '),
   )
   return new Response(response.body, { status: response.status, headers })
 }

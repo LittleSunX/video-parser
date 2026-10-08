@@ -109,9 +109,91 @@ test('null, arrays, invalid JSON and missing URL return 400 rather than 500', as
   }
 })
 
-test('non-JSON input is rejected with 415', async () => {
+test('unsupported content types are rejected with 415', async () => {
   const response = await worker.fetch(parseRequest('{}', { 'Content-Type': 'text/plain' }), env)
   assert.equal(response.status, 415)
+})
+
+test('form submissions use the same parser and retain video metadata', async () => {
+  let calls = 0
+  const source = 'https://www.douyin.com/video/123?caption=a%2Bb&from=share'
+  global.fetch = async () => {
+    calls++
+    return Response.json({
+      aweme_detail: {
+        aweme_id: '123',
+        desc: '分享文案 + & 中文',
+        author: { nickname: '作者' },
+        video: {
+          play_addr: { url_list: ['https://v.douyinvod.com/video.mp4'] },
+          cover: { url_list: ['https://p.douyinpic.com/cover.jpg'] },
+        },
+        music: { title: '音乐', play_url: { url_list: ['https://music.douyinvod.com/audio.mp3'] } },
+      },
+    })
+  }
+  const response = await worker.fetch(
+    new Request('https://api.example.com/api/parse', {
+      method: 'POST',
+      body: new URLSearchParams({ url: `复制分享 + & 中文 ${source}` }),
+    }),
+    env,
+  )
+  assert.equal(response.status, 200)
+  const { data } = await response.json()
+  assert.equal(calls, 1)
+  assert.equal(data.videoId, '123')
+  assert.equal(data.sourceUrl, source)
+  assert.equal(data.author, '作者')
+  assert.equal(data.cover, 'https://p.douyinpic.com/cover.jpg')
+  assert.equal(data.musicTitle, '音乐')
+  assert.equal(data.musicUrl, 'https://music.douyinvod.com/audio.mp3')
+})
+
+test('form submissions reject missing, duplicate and oversized input before fetching', async () => {
+  global.fetch = async () => assert.fail('invalid form must not reach upstream')
+  for (const [body, status] of [
+    ['', 400],
+    ['other=value', 400],
+    ['url=+', 400],
+    ['url=https%3A%2F%2Fwww.douyin.com%2Fvideo%2F123&url=another', 400],
+    [new URLSearchParams({ url: 'x'.repeat(5001) }).toString(), 413],
+    [
+      new URLSearchParams({
+        url: 'https://www.douyin.com/video/123',
+        padding: 'x'.repeat(32768),
+      }).toString(),
+      413,
+    ],
+  ]) {
+    const response = await worker.fetch(
+      parseRequest(body, { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }),
+      env,
+    )
+    assert.equal(response.status, status)
+  }
+})
+
+test('form submissions retain URL validation and rate limits', async () => {
+  global.fetch = async () => assert.fail('rejected form must not reach upstream')
+  const request = (url) =>
+    new Request('https://api.example.com/api/parse', {
+      method: 'POST',
+      body: new URLSearchParams({ url }),
+    })
+  for (const url of [
+    'https://example.com/video/123',
+    'https://user:pass@www.douyin.com/video/123',
+  ]) {
+    const response = await worker.fetch(request(url), env)
+    assert.equal(response.status, 400)
+  }
+  const response = await worker.fetch(request('https://www.douyin.com/video/123'), {
+    ...env,
+    PARSE_RATE_LIMITER: { limit: async () => ({ success: false }) },
+  })
+  assert.equal(response.status, 429)
+  assert.equal(response.headers.get('Retry-After'), '60')
 })
 
 test('body cap applies without Content-Length and also enforces URL character limit', async () => {
