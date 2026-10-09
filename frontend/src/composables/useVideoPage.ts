@@ -9,8 +9,12 @@ export function useVideoPage() {
   const loading = ref(false)
   const errorMessage = ref('')
   const video = ref<VideoInfo | null>(null)
+  const previewing = ref(false)
   const { notice, showNotice, clearNotice } = useNotice()
-  const downloads = useMediaDownloads(video, showNotice)
+  const downloads = useMediaDownloads(
+    computed(() => (loading.value ? null : video.value)),
+    showNotice,
+  )
   const { stopBatchDownload, cancelVideoDownload, downloadStatus, coverDownload, musicDownload } =
     downloads
   let parseController: AbortController | undefined
@@ -19,7 +23,7 @@ export function useVideoPage() {
     () => video.value?.images?.filter((image) => !!image.livePhotoUrl).length ?? 0,
   )
   const parseWarning = computed(() => {
-    if (!video.value) return ''
+    if (!video.value || previewing.value) return ''
     if (video.value.mediaType === 'image' && video.value.imagesComplete === true) return ''
     if (video.value.imagesComplete !== false && video.value.parseStatus !== 'unverified') return ''
     return video.value.parseReason === 'timeout'
@@ -27,6 +31,7 @@ export function useVideoPage() {
       : '已获取可用资源，尚无法确认图片及实况资源是否齐全；可下载已有资源或重新解析尝试补齐。'
   })
   const imageQualityNotice = computed(() =>
+    !previewing.value &&
     video.value?.mediaType === 'image' &&
     video.value.imagesComplete === true &&
     video.value.images?.some((image) => !!image.url && !image.watermarkFree)
@@ -50,12 +55,18 @@ export function useVideoPage() {
     loading.value = true
     errorMessage.value = ''
     video.value = null
+    previewing.value = false
     clearNotice()
 
     try {
-      const result = await parseVideo(input.value.trim(), controller.signal)
+      const result = await parseVideo(input.value.trim(), controller.signal, (candidate) => {
+        if (parseController !== controller || controller.signal.aborted) return
+        video.value = candidate
+        previewing.value = true
+      })
       if (parseController !== controller || controller.signal.aborted) return
       video.value = result
+      previewing.value = false
       if (parseWarning.value) {
         showNotice('已获取可用资源，完整性尚未确认', 6000)
       } else if (video.value.mediaType === 'image' && livePhotoCount.value > 0) {
@@ -65,6 +76,8 @@ export function useVideoPage() {
       }
     } catch (error) {
       if (parseController !== controller) return
+      video.value = null
+      previewing.value = false
       errorMessage.value = controller.signal.aborted
         ? controller.signal.reason?.name === 'TimeoutError'
           ? '解析超时，请重试'
@@ -85,10 +98,15 @@ export function useVideoPage() {
     parseController?.abort()
     parseController = undefined
     loading.value = false
+    if (previewing.value) video.value = null
+    previewing.value = false
     showNotice('已取消解析')
   }
 
   function handleClear() {
+    parseController?.abort()
+    parseController = undefined
+    loading.value = false
     stopBatchDownload()
     cancelVideoDownload()
     coverDownload.reset()
@@ -96,6 +114,7 @@ export function useVideoPage() {
     downloadStatus.value = ''
     input.value = ''
     video.value = null
+    previewing.value = false
     errorMessage.value = ''
     clearNotice()
   }
@@ -109,6 +128,7 @@ export function useVideoPage() {
     loading,
     errorMessage,
     video,
+    previewing,
     notice,
     canSubmit,
     livePhotoCount,

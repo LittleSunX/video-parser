@@ -9,6 +9,7 @@ import { findMediaItem, findFilterReason } from './douyin/items'
 import { extractRouterData, pageMatchesExpectedVideo, extractMeta } from './douyin/page'
 import { runParseStrategies } from './douyin/strategies'
 import { normalizeText, normalizeUrl } from './douyin/text'
+import type { AttemptScheduler } from './douyin/attempt-scheduler'
 
 export class DouyinParser implements VideoParser {
   supports(url: string): boolean {
@@ -25,7 +26,12 @@ export class DouyinParser implements VideoParser {
     }
   }
 
-  async parse(url: string, signal?: AbortSignal, trace?: Diagnostics): Promise<VideoInfo> {
+  async parse(
+    url: string,
+    signal?: AbortSignal,
+    trace?: Diagnostics,
+    onPreview?: (video: VideoInfo) => void,
+  ): Promise<VideoInfo> {
     const sourceUrl = new URL(url)
     const videoId = extractDouyinVideoId(sourceUrl)
 
@@ -36,27 +42,27 @@ export class DouyinParser implements VideoParser {
     const strategies = [
       {
         name: 'web-detail',
-        run: (strategySignal: AbortSignal) =>
-          this.parseFromWebDetail(videoId, sourceUrl, strategySignal, trace),
+        run: (strategySignal: AbortSignal, attempts: AttemptScheduler) =>
+          this.parseFromWebDetail(videoId, sourceUrl, strategySignal, trace, attempts),
       },
       {
         name: 'mobile-feed',
-        run: (strategySignal: AbortSignal) =>
-          this.parseFromMobileFeed(videoId, sourceUrl, strategySignal, trace),
+        run: (strategySignal: AbortSignal, attempts: AttemptScheduler) =>
+          this.parseFromMobileFeed(videoId, sourceUrl, strategySignal, trace, attempts),
       },
       {
         name: 'mobile-ssr',
-        run: (strategySignal: AbortSignal) =>
-          this.parseFromMobileSsr(videoId, sourceUrl, strategySignal, trace),
+        run: (strategySignal: AbortSignal, attempts: AttemptScheduler) =>
+          this.parseFromMobileSsr(videoId, sourceUrl, strategySignal, trace, attempts),
       },
       {
         name: 'page-meta',
-        run: (strategySignal: AbortSignal) =>
-          this.parseFromCurrentPage(sourceUrl, videoId, strategySignal, trace),
+        run: (strategySignal: AbortSignal, attempts: AttemptScheduler) =>
+          this.parseFromCurrentPage(sourceUrl, videoId, strategySignal, trace, attempts),
       },
     ]
 
-    return runParseStrategies(strategies, signal, trace)
+    return runParseStrategies(strategies, signal, trace, onPreview)
   }
 
   private async parseFromWebDetail(
@@ -64,6 +70,7 @@ export class DouyinParser implements VideoParser {
     sourceUrl: URL,
     signal?: AbortSignal,
     trace?: Diagnostics,
+    attempts?: AttemptScheduler,
   ): Promise<ParsedMediaResult> {
     const endpoint =
       'https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=' +
@@ -74,6 +81,7 @@ export class DouyinParser implements VideoParser {
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       signal?.throwIfAborted()
+      const release = await attempts?.acquire(attempt + 1)
       const diagnostic = createUpstreamAttempt(
         trace,
         'web-detail',
@@ -82,6 +90,7 @@ export class DouyinParser implements VideoParser {
         signal,
       )
       try {
+        signal?.throwIfAborted()
         const response = await diagnostic.response(() =>
           fetch(endpoint, {
             headers: buildWebDetailHeaders(),
@@ -124,6 +133,7 @@ export class DouyinParser implements VideoParser {
         lastError = error instanceof Error ? error.message : String(error)
       } finally {
         diagnostic.finish()
+        release?.()
       }
     }
 
@@ -134,6 +144,7 @@ export class DouyinParser implements VideoParser {
     sourceUrl: URL,
     signal?: AbortSignal,
     trace?: Diagnostics,
+    attempts?: AttemptScheduler,
   ): Promise<ParsedMediaResult> {
     const candidates = [
       sourceUrl.toString(),
@@ -158,6 +169,7 @@ export class DouyinParser implements VideoParser {
 
     for (const [index, candidate] of candidates.entries()) {
       signal?.throwIfAborted()
+      const release = await attempts?.acquire(index + 1)
       const diagnostic = createUpstreamAttempt(
         trace,
         'mobile-ssr',
@@ -166,6 +178,7 @@ export class DouyinParser implements VideoParser {
         signal,
       )
       try {
+        signal?.throwIfAborted()
         const response = await diagnostic.response(() =>
           fetch(candidate, {
             method: 'GET',
@@ -221,6 +234,7 @@ export class DouyinParser implements VideoParser {
         lastError = error instanceof Error ? error.message : String(error)
       } finally {
         diagnostic.finish()
+        release?.()
       }
     }
 
@@ -232,6 +246,7 @@ export class DouyinParser implements VideoParser {
     sourceUrl: URL,
     signal?: AbortSignal,
     trace?: Diagnostics,
+    attempts?: AttemptScheduler,
   ): Promise<ParsedMediaResult> {
     const endpoints = [
       'https://api5-normal-c-hl.amemv.com/aweme/v1/feed/?aweme_id=' +
@@ -256,6 +271,7 @@ export class DouyinParser implements VideoParser {
 
     for (const [index, endpoint] of endpoints.entries()) {
       signal?.throwIfAborted()
+      const release = await attempts?.acquire(index + 1)
       const diagnostic = createUpstreamAttempt(
         trace,
         'mobile-feed',
@@ -264,6 +280,7 @@ export class DouyinParser implements VideoParser {
         signal,
       )
       try {
+        signal?.throwIfAborted()
         const response = await diagnostic.response(() =>
           fetch(endpoint, {
             headers: {
@@ -299,6 +316,7 @@ export class DouyinParser implements VideoParser {
         // 尝试备用移动端节点。
       } finally {
         diagnostic.finish()
+        release?.()
       }
     }
 
@@ -310,9 +328,12 @@ export class DouyinParser implements VideoParser {
     videoId: string,
     signal?: AbortSignal,
     trace?: Diagnostics,
+    attempts?: AttemptScheduler,
   ): Promise<ParsedMediaResult> {
+    const release = await attempts?.acquire(1)
     const diagnostic = createUpstreamAttempt(trace, 'page-meta', 'current-page', 1, signal)
     try {
+      signal?.throwIfAborted()
       const response = await diagnostic.response(() =>
         fetch(sourceUrl.toString(), {
           headers: buildPageHeaders(),
@@ -378,6 +399,7 @@ export class DouyinParser implements VideoParser {
       throw error
     } finally {
       diagnostic.finish()
+      release?.()
     }
   }
 }

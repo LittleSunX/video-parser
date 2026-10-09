@@ -10,6 +10,8 @@ import { enforceRateLimit, type Env } from './utils/rate-limit'
 import { readParseInput } from './utils/parse-input'
 import { errorResponse } from './utils/error-response'
 import { downloadErrorPage } from './utils/download-error-page'
+import { acceptsParseStream, parseStreamResponse } from './services/parse-stream'
+import { extractUrl, validateSupportedUrl } from './utils/url'
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -63,6 +65,10 @@ async function handleParse(request: Request, env: Env, trace: Diagnostics): Prom
   try {
     await enforceRateLimit(request, env, 'parse')
     const input = await readParseInput(request)
+    if (acceptsParseStream(request)) {
+      validateSupportedUrl(extractUrl(input))
+      return parseStreamResponse(input, request.signal, trace)
+    }
     const video = await parseVideo(input, request.signal, trace)
     trace.emit('parse_result', mediaCounts(video))
 

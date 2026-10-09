@@ -3,22 +3,25 @@ import { AppError } from '../../errors/app-error'
 import type { VideoInfo } from '../../types/video'
 import type { ParsedMediaResult } from './types'
 import { hasAllImageResources, isHighConfidenceImageResult, mergeImageAssets } from './images'
+import { createAttemptScheduler, type AttemptScheduler } from './attempt-scheduler'
 
 interface ParseStrategy {
   name: string
-  run: (signal: AbortSignal) => Promise<ParsedMediaResult>
+  run: (signal: AbortSignal, attempts: AttemptScheduler) => Promise<ParsedMediaResult>
 }
 
-/** 优先主接口；等待 600 ms 后允许一个备用策略并行，最多两个在途策略。 */
+/** 主策略领先 600 ms；新策略优先于重试，单次上游尝试最多两个在途。 */
 export function runParseStrategies(
   strategies: ParseStrategy[],
   signal?: AbortSignal,
   trace?: Diagnostics,
+  onPreview?: (video: VideoInfo) => void,
 ): Promise<VideoInfo> {
   signal?.throwIfAborted()
   const strategiesStarted = Date.now()
   return new Promise((resolve, reject) => {
     const controller = new AbortController()
+    const attempts = createAttemptScheduler(controller.signal, launch)
     const failures: string[] = []
     let bestImage: VideoInfo | undefined
     let imagesComplete = false
@@ -72,8 +75,28 @@ export function runParseStrategies(
 
     function schedule() {
       clearTimeout(timer)
-      if (!settled && active < 2 && next < strategies.length) {
+      if (!settled && next < strategies.length) {
         timer = setTimeout(launch, 600)
+      }
+    }
+
+    function preview(video: VideoInfo) {
+      if (!onPreview) return
+      const snapshot = {
+        ...video,
+        ...(video.images
+          ? {
+              images: video.images.map((image) => ({ ...image })),
+              imagesComplete: imagesComplete && hasAllImageResources(video.images),
+            }
+          : {}),
+      }
+      delete snapshot.parseStatus
+      delete snapshot.parseReason
+      try {
+        onPreview(snapshot)
+      } catch {
+        // Observers must not discard validated resources or change quality selection.
       }
     }
 
@@ -90,11 +113,15 @@ export function runParseStrategies(
         })
       }
       if (video.videoUrl && !bestImage) {
+        preview(video)
         finish(video)
         return
       }
       if (bestImage) bestImage = mergeMetadata(bestImage, video)
-      if (!video.images?.length) return
+      if (!video.images?.length) {
+        if (bestImage) preview(bestImage)
+        return
+      }
       if (!bestImage) {
         bestImage = video
         imagesComplete = result.imagesComplete
@@ -110,6 +137,7 @@ export function runParseStrategies(
         if (!result.imagesComplete || images.length > previous.length) imagesComplete = false
         if (result.imagesComplete && video.images.length >= images.length) imagesComplete = true
       }
+      preview(bestImage)
       // 完整性仍由当前策略确认；合并只补充已识别资源，不推测缺失项。
       if (
         video.images.length >= (bestImage.images?.length ?? 0) &&
@@ -119,13 +147,13 @@ export function runParseStrategies(
     }
 
     function launch() {
-      if (settled || active >= 2 || next >= strategies.length) return
+      if (settled || next >= strategies.length) return
       const strategy = strategies[next++]
       active++
       const started = Date.now()
       void (async () => {
         try {
-          const result = await strategy.run(controller.signal)
+          const result = await strategy.run(controller.signal, attempts)
           trace?.emit('strategy_complete', {
             strategy: strategy.name,
             outcome: settled ? 'cancelled' : 'success',

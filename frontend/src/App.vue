@@ -8,6 +8,7 @@ const {
   loading,
   errorMessage,
   video,
+  previewing,
   notice,
   canSubmit,
   livePhotoCount,
@@ -142,7 +143,7 @@ function platformName(platform: VideoInfo['platform']) {
               v-if="asset.livePhotoUrl"
               type="button"
               class="image-download-button primary-image-action"
-              :disabled="batchDownloading || !!batchPart || batchCanContinue"
+              :disabled="loading || batchDownloading || !!batchPart || batchCanContinue"
               @click="handleDownloadLivePhoto(index)"
             >
               下载动态视频
@@ -151,7 +152,7 @@ function platformName(platform: VideoInfo['platform']) {
               v-if="asset.url"
               type="button"
               class="image-download-button"
-              :disabled="batchDownloading || !!batchPart || batchCanContinue"
+              :disabled="loading || batchDownloading || !!batchPart || batchCanContinue"
               @click="handleDownloadImage(index)"
             >
               {{ asset.watermarkFree ? '下载无水印原图' : '下载高清原图' }}
@@ -161,6 +162,9 @@ function platformName(platform: VideoInfo['platform']) {
       </div>
 
       <div class="video-info">
+        <p v-if="previewing" class="download-tip" role="status">
+          已获取作品，正在检查其余资源与画质；完成后即可下载。
+        </p>
         <div class="result-topline">
           <span class="platform-tag">{{ platformName(video.platform) }}</span>
           <span class="media-type-tag">{{
@@ -183,7 +187,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'video' && video.videoUrl"
             class="download-button"
             type="button"
-            :disabled="videoDownloading"
+            :disabled="loading || videoDownloading"
             @click="handleDownloadVideo"
           >
             {{ videoDownloading ? '正在下载…' : '下载视频' }}
@@ -192,7 +196,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'video' && video.videoUrl"
             class="secondary-button"
             type="button"
-            :disabled="videoDownloading"
+            :disabled="loading || videoDownloading"
             @click="handleProxyDownloadVideo"
           >
             备用下载
@@ -201,7 +205,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'video' && video.videoUrl"
             class="secondary-button"
             type="button"
-            :disabled="videoDownloading"
+            :disabled="loading || videoDownloading"
             @click="handleOpenVideoLink"
           >
             打开直链
@@ -218,7 +222,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'image' && video.images?.length"
             class="download-button"
             type="button"
-            :disabled="batchDownloading || !!batchPart || batchCanContinue"
+            :disabled="loading || batchDownloading || !!batchPart || batchCanContinue"
             @click="handleDownloadAllPreferred"
           >
             {{
@@ -233,7 +237,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'image' && livePhotoCount > 0"
             class="secondary-button"
             type="button"
-            :disabled="batchDownloading || !!batchPart || batchCanContinue"
+            :disabled="loading || batchDownloading || !!batchPart || batchCanContinue"
             @click="handleDownloadAllOriginals"
           >
             打包下载全部原图
@@ -242,6 +246,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'video' && video.videoUrl"
             class="secondary-button"
             type="button"
+            :disabled="loading"
             @click="handleCopyVideoUrl"
           >
             复制视频地址
@@ -250,7 +255,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'video' && video.cover"
             class="secondary-button"
             type="button"
-            :disabled="coverDownload.downloading"
+            :disabled="loading || coverDownload.downloading"
             @click="coverDownload.start"
           >
             {{ coverDownload.downloading ? '正在下载封面…' : '下载封面' }}
@@ -259,7 +264,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.musicUrl"
             class="secondary-button"
             type="button"
-            :disabled="musicDownload.downloading"
+            :disabled="loading || musicDownload.downloading"
             @click="musicDownload.start"
           >
             {{ musicDownload.downloading ? '正在下载背景音乐…' : '下载背景音乐' }}

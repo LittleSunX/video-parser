@@ -438,14 +438,30 @@ test('diagnostic serialization rejects arbitrary fields and dynamic labels', () 
 
 test('all existing failed requests have fixed endpoint labels and unchanged retry counts', async () => {
   const logs = vi.spyOn(console, 'info').mockImplementation(() => {})
-  const fetch = vi.fn(async () => new Response('PRIVATE_SIGNED_URL', { status: 403 }))
+  const cancel = vi.fn()
+  const fetch = vi.fn(
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('PRIVATE_SIGNED_URL'))
+          },
+          cancel,
+        }),
+        { status: 403 },
+      ),
+  )
   vi.stubGlobal('fetch', fetch)
   await expect(
     new DouyinParser().parse(source, undefined, createDiagnostics()),
   ).rejects.toMatchObject({ code: 'VIDEO_RESOURCE_NOT_FOUND' })
   expect(fetch).toHaveBeenCalledTimes(15)
+  expect(cancel).toHaveBeenCalledTimes(15)
   const attempts = recordsFrom(logs).filter((record) => record.event === 'upstream_attempt')
-  expect(attempts.map(({ strategy, endpoint, attempt }) => [strategy, endpoint, attempt])).toEqual([
+  const grouped = ['web-detail', 'mobile-feed', 'mobile-ssr', 'page-meta'].flatMap((name) =>
+    attempts.filter(({ strategy }) => strategy === name),
+  )
+  expect(grouped.map(({ strategy, endpoint, attempt }) => [strategy, endpoint, attempt])).toEqual([
     ['web-detail', 'web-detail', 1],
     ['web-detail', 'web-detail', 2],
     ['web-detail', 'web-detail', 3],
@@ -490,14 +506,19 @@ const privateItem = {
 
 test('primary attempt outcomes preserve returned author, cover and music without extra requests', async () => {
   const logs = vi.spyOn(console, 'info').mockImplementation(() => {})
-  const fetch = vi
-    .fn()
-    .mockResolvedValueOnce(new Response('  '))
-    .mockResolvedValueOnce(new Response('PRIVATE_INVALID_JSON'))
-    .mockResolvedValueOnce(Response.json({ aweme_detail: privateItem }))
+  const primary = [
+    new Response('  '),
+    new Response('PRIVATE_INVALID_JSON'),
+    Response.json({ aweme_detail: privateItem }),
+  ]
+  const fetch = vi.fn(async (url) =>
+    String(url).includes('/aweme/v1/web/')
+      ? primary.shift()
+      : new Response('PRIVATE_ERROR_BODY', { status: 403 }),
+  )
   vi.stubGlobal('fetch', fetch)
   const result = await new DouyinParser().parse(source, undefined, createDiagnostics())
-  expect(fetch).toHaveBeenCalledTimes(3)
+  expect(fetch.mock.calls.filter(([url]) => String(url).includes('/aweme/v1/web/'))).toHaveLength(3)
   expect(result).toMatchObject({
     author: privateItem.author.nickname,
     cover: privateItem.video.cover.url_list[0],
@@ -508,7 +529,9 @@ test('primary attempt outcomes preserve returned author, cover and music without
   })
   const records = recordsFrom(logs)
   expect(
-    records.filter(({ event }) => event === 'upstream_attempt').map(({ result }) => result),
+    records
+      .filter(({ event, strategy }) => event === 'upstream_attempt' && strategy === 'web-detail')
+      .map(({ result }) => result),
   ).toEqual(['empty_response', 'invalid_json', 'success'])
   expect(records.find(({ event }) => event === 'parse_first_usable')).toMatchObject({
     strategy: 'web-detail',
@@ -523,7 +546,6 @@ test('primary attempt outcomes preserve returned author, cover and music without
 test('feed attempts distinguish malformed JSON, missing items and body read errors', async () => {
   const logs = vi.spyOn(console, 'info').mockImplementation(() => {})
   const responses = [
-    ...Array.from({ length: 3 }, () => new Response('PRIVATE_ERROR_BODY', { status: 403 })),
     new Response('PRIVATE_BAD_JSON'),
     Response.json({ aweme_detail: { ...privateItem, aweme_id: '456' } }),
     new Response(
@@ -535,13 +557,19 @@ test('feed attempts distinguish malformed JSON, missing items and body read erro
     ),
     Response.json({ aweme_detail: privateItem }),
   ]
-  const fetch = vi.fn(async () => responses.shift())
+  const fetch = vi.fn(async (url) =>
+    String(url).includes('/aweme/v1/feed/')
+      ? responses.shift()
+      : new Response('PRIVATE_ERROR_BODY', { status: 403 }),
+  )
   vi.stubGlobal('fetch', fetch)
   expect(await new DouyinParser().parse(source, undefined, createDiagnostics())).toMatchObject({
     author: privateItem.author.nickname,
     musicUrl: privateItem.music.play_url.url_list[0],
   })
-  expect(fetch).toHaveBeenCalledTimes(7)
+  expect(fetch.mock.calls.filter(([url]) => String(url).includes('/aweme/v1/feed/'))).toHaveLength(
+    4,
+  )
   expect(
     recordsFrom(logs)
       .filter(({ event, strategy }) => event === 'upstream_attempt' && strategy === 'mobile-feed')
@@ -556,14 +584,21 @@ const routerHtml = (data) =>
 test('SSR attempts distinguish page extraction outcomes without losing metadata', async () => {
   const logs = vi.spyOn(console, 'info').mockImplementation(() => {})
   const responses = [
-    ...Array.from({ length: 7 }, () => new Response('PRIVATE_ERROR_BODY', { status: 403 })),
     new Response('PRIVATE_SMALL_PAGE'),
     new Response('PRIVATE_NO_ROUTER' + ' '.repeat(1000)),
     new Response(routerHtml({ notice: 'PRIVATE_FILTER_REASON' })),
     new Response(routerHtml({ aweme_detail: { aweme_id: '123', video: {} } })),
     new Response(routerHtml({ aweme_detail: privateItem })),
   ]
-  const fetch = vi.fn(async () => responses.shift())
+  let sourceRequests = 0
+  const fetch = vi.fn(async (url) => {
+    if (String(url) === source) {
+      sourceRequests++
+      if (sourceRequests === 1) return responses.shift()
+    }
+    if (String(url).includes('/share/')) return responses.shift()
+    return new Response('PRIVATE_ERROR_BODY', { status: 403 })
+  })
   vi.stubGlobal('fetch', fetch)
   expect(await new DouyinParser().parse(source, undefined, createDiagnostics())).toMatchObject({
     author: privateItem.author.nickname,
@@ -571,7 +606,7 @@ test('SSR attempts distinguish page extraction outcomes without losing metadata'
     musicTitle: privateItem.music.title,
     musicUrl: privateItem.music.play_url.url_list[0],
   })
-  expect(fetch).toHaveBeenCalledTimes(12)
+  expect(responses).toHaveLength(0)
   expect(
     recordsFrom(logs)
       .filter(({ event, strategy }) => event === 'upstream_attempt' && strategy === 'mobile-ssr')
@@ -591,12 +626,11 @@ test.each([
   ['<a href="/video/123">PRIVATE_TITLE</a>', 'resource_missing'],
 ])('page metadata failures use fixed categories', async (html, category) => {
   const logs = vi.spyOn(console, 'info').mockImplementation(() => {})
-  const fetch = vi.fn(
-    async () =>
-      new Response(fetch.mock.calls.length === 15 ? html : 'PRIVATE_ERROR_BODY', {
-        status: fetch.mock.calls.length === 15 ? 200 : 403,
-      }),
-  )
+  let sourceRequests = 0
+  const fetch = vi.fn(async (url) => {
+    if (String(url) === source && ++sourceRequests === 2) return new Response(html)
+    return new Response('PRIVATE_ERROR_BODY', { status: 403 })
+  })
   vi.stubGlobal('fetch', fetch)
   await expect(
     new DouyinParser().parse(source, undefined, createDiagnostics()),
