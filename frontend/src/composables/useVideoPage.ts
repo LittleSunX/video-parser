@@ -2,7 +2,7 @@ import { ref, computed, onScopeDispose } from 'vue'
 import { parseVideo } from '../api/video'
 import type { VideoInfo } from '../types/video'
 import { useNotice } from './useNotice'
-import { useMediaDownloads } from './useMediaDownloads'
+import { imageDownloadLabel, imageDownloadTargets, useMediaDownloads } from './useMediaDownloads'
 
 export function useVideoPage() {
   const input = ref('')
@@ -21,6 +21,19 @@ export function useVideoPage() {
   const canSubmit = computed(() => input.value.trim().length > 0 && !loading.value)
   const livePhotoCount = computed(
     () => video.value?.images?.filter((image) => !!image.livePhotoUrl).length ?? 0,
+  )
+  const preferredDownloads = computed(() => imageDownloadTargets(video.value, true))
+  const originalDownloads = computed(() => imageDownloadTargets(video.value, false))
+  const preferredDownloadCount = computed(() => preferredDownloads.value.length)
+  const originalDownloadCount = computed(() => originalDownloads.value.length)
+  const preferredDownloadLabel = computed(() => imageDownloadLabel(preferredDownloads.value))
+  const originalDownloadLabel = computed(() =>
+    originalDownloadCount.value > 1
+      ? '打包下载全部原图'
+      : imageDownloadLabel(originalDownloads.value),
+  )
+  const hasArchiveDownloads = computed(
+    () => preferredDownloadCount.value > 1 || originalDownloadCount.value > 1,
   )
   const parseWarning = computed(() => {
     if (!video.value || previewing.value) return ''
@@ -132,6 +145,11 @@ export function useVideoPage() {
     notice,
     canSubmit,
     livePhotoCount,
+    preferredDownloadCount,
+    originalDownloadCount,
+    preferredDownloadLabel,
+    originalDownloadLabel,
+    hasArchiveDownloads,
     parseWarning,
     imageQualityNotice,
     handleParse,
