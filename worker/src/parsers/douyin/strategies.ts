@@ -16,6 +16,7 @@ export function runParseStrategies(
   trace?: Diagnostics,
 ): Promise<VideoInfo> {
   signal?.throwIfAborted()
+  const strategiesStarted = Date.now()
   return new Promise((resolve, reject) => {
     const controller = new AbortController()
     const failures: string[] = []
@@ -24,6 +25,7 @@ export function runParseStrategies(
     let next = 0
     let active = 0
     let settled = false
+    let firstUsable = false
     let timer: ReturnType<typeof setTimeout> | undefined
 
     function finish(
@@ -35,8 +37,12 @@ export function runParseStrategies(
       settled = true
       trace?.emit('parse_selection', {
         reason,
+        durationMs: Math.max(0, Date.now() - strategiesStarted),
         outcome: video ? 'success' : reason === 'cancelled' ? 'cancelled' : 'error',
         ...(video ? mediaCounts(video) : { code: errorCode(error) }),
+        ...(video?.images
+          ? { imagesComplete: imagesComplete && hasAllImageResources(video.images) }
+          : {}),
       })
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
@@ -71,8 +77,18 @@ export function runParseStrategies(
       }
     }
 
-    function accept(result: ParsedMediaResult) {
+    function accept(result: ParsedMediaResult, strategy: string) {
       const video = result.video
+      const counts = mediaCounts(video)
+      if (!firstUsable && (counts.videos || counts.images || counts.livePhotos)) {
+        firstUsable = true
+        trace?.emit('parse_first_usable', {
+          strategy,
+          durationMs: Math.max(0, Date.now() - strategiesStarted),
+          imagesComplete: result.imagesComplete,
+          ...counts,
+        })
+      }
       if (video.videoUrl && !bestImage) {
         finish(video)
         return
@@ -117,7 +133,7 @@ export function runParseStrategies(
             imagesComplete: result.imagesComplete,
             ...mediaCounts(result.video),
           })
-          if (!settled) accept(result)
+          if (!settled) accept(result, strategy.name)
         } catch (error) {
           trace?.emit('strategy_complete', {
             strategy: strategy.name,

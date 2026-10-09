@@ -138,7 +138,12 @@ export async function downloadMediaArchive(
         try {
           blob = await fetchMediaBlob(
             buildDownloadUrl(job.url, job.filename),
-            options,
+            {
+              ...options,
+              // 代理沿用 Worker 的响应与停滞超时，避免客户端先于代理中断慢连接。
+              responseTimeoutMs: 0,
+              readTimeoutMs: 0,
+            },
             kind,
             session.maxPartBytes - received,
           )
