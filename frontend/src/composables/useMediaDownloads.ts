@@ -9,8 +9,14 @@ import {
 import { MediaDownloadError } from '../utils/download-error'
 import { ref, onScopeDispose, type Ref } from 'vue'
 import type { VideoInfo } from '../types/video'
-import { downloadDirectVideo } from '../utils/auto-download'
+import { fetchMediaBlob } from '../utils/auto-download'
 import { useFileDownload } from './useFileDownload'
+import {
+  createDownloadBufferBudget,
+  PAGE_BUFFER_BUDGET_BYTES,
+  ZIP_PART_SOURCE_BYTES,
+} from '../utils/download-buffer'
+import { createPreparedDownload, PREPARED_DOWNLOAD_TTL_MS } from '../utils/prepared-download'
 import {
   buildCoverFilename,
   buildImageFilename,
@@ -26,6 +32,7 @@ export function useMediaDownloads(
   video: Ref<VideoInfo | null>,
   showNotice: (message: string, duration?: number) => void,
 ) {
+  const bufferBudget = createDownloadBufferBudget()
   const coverDownload = useFileDownload({
     label: '封面',
     kind: 'image',
@@ -36,6 +43,7 @@ export function useMediaDownloads(
         : undefined
     },
     showNotice,
+    bufferBudget,
   })
   const musicDownload = useFileDownload({
     label: '背景音乐',
@@ -47,6 +55,7 @@ export function useMediaDownloads(
         : undefined
     },
     showNotice,
+    bufferBudget,
   })
   const batchDownloading = ref(false)
   const batchProgress = ref('')
@@ -70,8 +79,36 @@ export function useMediaDownloads(
   let nativeRequestNumber = 0
   let downloadController: AbortController | undefined
   let batchController: AbortController | undefined
+  let releaseVideoBuffer: (() => void) | undefined
+  let releaseBatchBuffer: (() => void) | undefined
+  let batchExpiry: ReturnType<typeof setTimeout> | undefined
+  const videoPrepared = createPreparedDownload(() => bufferBudget.retain(videoOwner, 0))
+  const videoOwner = bufferBudget.register(() => {
+    videoPrepared.clear()
+    bufferBudget.retain(videoOwner, 0)
+  })
+  const batchPrepared = createPreparedDownload(expireBatchFiles)
+  const batchOwner = bufferBudget.register(stopBatchDownload)
+
+  function expireBatchFiles() {
+    bufferBudget.retain(batchOwner, 0)
+    if (batchSession?.part || batchSession?.files.size) {
+      stopBatchDownload()
+      batchProgress.value = '当前包暂存已到期，请重新准备下载。'
+    }
+  }
+
+  function prepareAndSaveBatch(blob: Blob, filename: string) {
+    batchPrepared.prepare(blob, filename)
+    bufferBudget.retain(batchOwner, blob.size)
+    batchPrepared.save()
+  }
 
   function startNativeDownload(url: string, filename: string, message: string) {
+    if (!bufferBudget.clearRetained()) {
+      showNotice('请先完成或取消当前下载任务')
+      return
+    }
     const current = video.value
     const requestNumber = ++nativeRequestNumber
     downloadNeedsReparse.value = false
@@ -119,6 +156,14 @@ export function useMediaDownloads(
   async function handleDownloadVideo() {
     const current = video.value
     if (!current?.videoUrl || videoDownloading.value) return
+    const release = bufferBudget.acquire(videoOwner, PAGE_BUFFER_BUDGET_BYTES)
+    if (!release) {
+      showNotice('请先完成或取消当前下载任务')
+      return
+    }
+    videoPrepared.clear()
+    bufferBudget.retain(videoOwner, 0)
+    releaseVideoBuffer = release
     const controller = new AbortController()
     downloadController = controller
     videoDownloading.value = true
@@ -126,7 +171,7 @@ export function useMediaDownloads(
     downloadNeedsReparse.value = false
     downloadStatus.value = '正在连接下载…'
     try {
-      await downloadDirectVideo(current.videoUrl, buildVideoFilename(current), {
+      const blob = await fetchMediaBlob(current.videoUrl, {
         signal: controller.signal,
         onProgress(received, total) {
           if (downloadController !== controller) return
@@ -136,17 +181,42 @@ export function useMediaDownloads(
         },
       })
       if (downloadController !== controller) return
+      videoPrepared.prepare(blob, buildVideoFilename(current))
+      bufferBudget.retain(videoOwner, blob.size)
+      videoPrepared.save()
       downloadState.value = 'handed-off'
-      downloadStatus.value = '已请求浏览器保存，请查看下载列表；若未保存，可使用备用下载。'
+      downloadStatus.value = '已请求浏览器保存，请查看下载列表；未保存时可在 30 秒内再次保存。'
       showNotice('视频已交给浏览器保存，请查看下载列表', 6000)
     } catch {
       if (controller.signal.aborted || downloadController !== controller) return
-      startNativeDownload(current.videoUrl, buildVideoFilename(current), '已切换到备用下载')
+      if (videoPrepared.canSave.value) {
+        downloadState.value = 'failed'
+        downloadStatus.value = '文件已接收，未能发起保存，请点击再次保存。'
+        showNotice(downloadStatus.value, 6000)
+      } else {
+        release()
+        releaseVideoBuffer = undefined
+        startNativeDownload(current.videoUrl, buildVideoFilename(current), '已切换到备用下载')
+      }
     } finally {
+      release()
       if (downloadController === controller) {
+        releaseVideoBuffer = undefined
         downloadController = undefined
         videoDownloading.value = false
       }
+    }
+  }
+
+  function saveVideoAgain() {
+    if (!video.value?.videoUrl || bufferBudget.busy.value) return
+    try {
+      if (!videoPrepared.save()) return
+      downloadState.value = 'handed-off'
+      downloadStatus.value = '已再次请求浏览器保存，请查看下载列表。'
+      showNotice('已再次请求保存视频', 6000)
+    } catch {
+      showNotice('未能发起保存，请再次点击保存视频')
     }
   }
 
@@ -155,6 +225,10 @@ export function useMediaDownloads(
     downloadNeedsReparse.value = false
     downloadController?.abort()
     downloadController = undefined
+    releaseVideoBuffer?.()
+    releaseVideoBuffer = undefined
+    videoPrepared.clear()
+    bufferBudget.retain(videoOwner, 0)
     videoDownloading.value = false
     downloadState.value = 'cancelled'
     downloadStatus.value = '已取消下载'
@@ -205,6 +279,12 @@ export function useMediaDownloads(
   function stopBatchDownload() {
     batchController?.abort()
     batchController = undefined
+    releaseBatchBuffer?.()
+    releaseBatchBuffer = undefined
+    clearTimeout(batchExpiry)
+    batchExpiry = undefined
+    batchPrepared.clear()
+    bufferBudget.retain(batchOwner, 0)
     batchDownloading.value = false
     batchProgress.value = ''
     if (batchSession) clearBatchSession(batchSession)
@@ -228,6 +308,11 @@ export function useMediaDownloads(
       return asset.url ? [{ url: asset.url, filename: buildImageFilename(current, index) }] : []
     })
     if (!jobs.length) return
+    const release = bufferBudget.acquire(batchOwner, PAGE_BUFFER_BUDGET_BYTES)
+    if (!release) {
+      showNotice('请先完成或取消当前下载任务')
+      return
+    }
 
     const key = JSON.stringify(jobs)
     if (!batchSession || batchKey !== key) {
@@ -236,6 +321,13 @@ export function useMediaDownloads(
       batchKey = key
     }
     const session = batchSession
+    clearTimeout(batchExpiry)
+    batchPrepared.clear()
+    bufferBudget.retain(
+      batchOwner,
+      [...session.files.values()].reduce((sum, file) => sum + file.size, 0),
+    )
+    releaseBatchBuffer = release
     batchPreferLive = preferLive
     batchCanRetry.value = false
     batchCanContinue.value = false
@@ -256,10 +348,13 @@ export function useMediaDownloads(
         (items) => {
           if (batchController === controller) batchItems.value = items
         },
+        prepareAndSaveBatch,
       )
       if (batchController !== controller) return
       if (session.part) {
         const part = session.part
+        batchPrepared.prepare(part.blob, part.filename)
+        bufferBudget.retain(batchOwner, part.blob.size)
         batchPart.value = {
           number: part.number,
           count: part.count,
@@ -275,15 +370,37 @@ export function useMediaDownloads(
       showNotice('已请求浏览器保存 ZIP，解压后可查看全部文件', 6000)
     } catch (error) {
       if (controller.signal.aborted || batchController !== controller) return
+      if (session.part) {
+        const part = session.part
+        batchPrepared.prepare(part.blob, part.filename)
+        bufferBudget.retain(batchOwner, part.blob.size)
+        batchPart.value = {
+          number: part.number,
+          count: part.count,
+          size: part.blob.size,
+          final: part.final,
+        }
+        batchHasCache.value = true
+        batchProgress.value = '文件已打包，未能发起保存，请点击保存当前包。'
+        showNotice(batchProgress.value, 6000)
+        return
+      }
       batchCanRetry.value = !(
         error instanceof MediaDownloadError &&
         ['TOO_LARGE', 'EXPIRED', 'INVALID_MEDIA'].includes(error.code)
       )
       batchHasCache.value = session.files.size > 0
+      bufferBudget.retain(
+        batchOwner,
+        [...session.files.values()].reduce((sum, file) => sum + file.size, 0),
+      )
+      if (session.files.size) batchExpiry = setTimeout(expireBatchFiles, PREPARED_DOWNLOAD_TTL_MS)
       batchProgress.value = error instanceof Error ? error.message : '批量下载失败，请重试'
       showNotice(batchProgress.value, 6000)
     } finally {
+      release()
       if (batchController === controller) {
+        releaseBatchBuffer = undefined
         batchController = undefined
         batchDownloading.value = false
       }
@@ -291,10 +408,10 @@ export function useMediaDownloads(
   }
 
   function saveBatchPart() {
-    if (!batchSession?.part || batchDownloading.value) return
+    if (!video.value?.images?.length || !batchSession?.part || bufferBudget.busy.value) return
     const number = batchSession.part.number
     try {
-      const final = saveArchivePart(batchSession)
+      const final = saveArchivePart(batchSession, prepareAndSaveBatch)
       batchPart.value = null
       batchHasCache.value = false
       batchCanContinue.value = !final
@@ -304,6 +421,18 @@ export function useMediaDownloads(
       if (final) batchSession = undefined
     } catch {
       showNotice('未能发起保存，请再次点击保存当前包')
+    }
+  }
+
+  function saveBatchAgain() {
+    if (!video.value?.images?.length || bufferBudget.busy.value) return
+    if (batchSession?.part) return saveBatchPart()
+    try {
+      if (!batchPrepared.save()) return
+      batchProgress.value = '已再次请求浏览器保存当前 ZIP，请查看下载列表。'
+      showNotice('已再次请求保存 ZIP', 6000)
+    } catch {
+      showNotice('未能发起保存，请再次点击保存当前 ZIP')
     }
   }
 
@@ -317,13 +446,21 @@ export function useMediaDownloads(
 
   window.addEventListener?.('pagehide', stopBatchDownload)
   window.addEventListener?.('pagehide', stopNativeDownloads)
+  window.addEventListener?.('pagehide', cancelVideoDownload)
   onScopeDispose(() => {
     window.removeEventListener?.('pagehide', stopBatchDownload)
     window.removeEventListener?.('pagehide', stopNativeDownloads)
+    window.removeEventListener?.('pagehide', cancelVideoDownload)
     stopBatchDownload()
     cancelVideoDownload()
   })
   return {
+    bufferBusy: bufferBudget.busy,
+    canSaveVideoAgain: videoPrepared.canSave,
+    saveVideoAgain,
+    canSaveBatchAgain: batchPrepared.canSave,
+    saveBatchAgain,
+    batchPartLimitMiB: ZIP_PART_SOURCE_BYTES / 1024 / 1024,
     batchDownloading,
     batchProgress,
     batchItems,

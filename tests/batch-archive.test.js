@@ -104,10 +104,10 @@ test('incremental archive preserves Unicode names and cancellation before saving
   expect(saveBlob).not.toHaveBeenCalled()
 })
 
-test('a 65 MiB file succeeds with the new 128 MiB default without whole-file arrayBuffer reads', async () => {
-  const size = 65 * 1024 * 1024
+test('a 31 MiB file succeeds with the 32 MiB default without whole-file arrayBuffer reads', async () => {
+  const size = 31 * 1024 * 1024
   global.fetch = async () => {
-    let chunks = 65
+    let chunks = 31
     return new Response(
       new ReadableStream({
         pull(controller) {
@@ -140,6 +140,38 @@ test('a 65 MiB file succeeds with the new 128 MiB default without whole-file arr
     spy.mockRestore()
   }
 }, 20000)
+
+test('a failed first ZIP handoff preserves the prepared part without fetching or packing again', async () => {
+  const fetch = vi.fn(
+    async () => new Response('media', { headers: { 'Content-Type': 'video/mp4' } }),
+  )
+  global.fetch = fetch
+  const one = [jobs[0]]
+  const session = createBatchSession(one)
+  const failedSave = vi.fn(() => {
+    throw new Error('browser blocked')
+  })
+  await expect(
+    downloadMediaArchive(
+      one,
+      'ready.zip',
+      new AbortController().signal,
+      () => {},
+      session,
+      () => {},
+      failedSave,
+    ),
+  ).rejects.toThrow('browser blocked')
+  const prepared = session.part.blob
+  expect(session.files.size).toBe(0)
+  expect(session.part.final).toBe(true)
+  await downloadMediaArchive(one, 'ready.zip', new AbortController().signal, () => {}, session)
+  expect(session.part.blob).toBe(prepared)
+  expect(fetch).toHaveBeenCalledOnce()
+  const save = vi.fn()
+  expect(saveArchivePart(session, save)).toBe(true)
+  expect(save).toHaveBeenCalledWith(prepared, 'ready.zip')
+})
 
 test('batch media transfer can progress beyond two minutes without a total deadline', async () => {
   vi.useFakeTimers()

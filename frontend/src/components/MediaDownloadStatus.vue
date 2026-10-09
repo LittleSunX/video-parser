@@ -30,9 +30,19 @@ defineEmits<{ reparse: [] }>()
       取消{{ label }}下载
     </button>
     <button
+      v-if="download.canSaveAgain"
+      class="secondary-button"
+      type="button"
+      :disabled="download.bufferBusy"
+      @click="download.saveAgain"
+    >
+      再次保存{{ label }}
+    </button>
+    <button
       v-if="!download.downloading && ['handed-off', 'failed'].includes(download.state)"
       class="secondary-button"
       type="button"
+      :disabled="download.bufferBusy"
       @click="download.startBrowserDownload"
     >
       使用浏览器下载{{ label }}
