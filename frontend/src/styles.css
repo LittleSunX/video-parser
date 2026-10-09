@@ -226,12 +226,14 @@ a {
 .result-card {
   display: grid;
   grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
+  grid-template-areas: 'media info';
   gap: 26px;
   margin-top: 22px;
   padding: 22px;
 }
 
 .cover-wrap {
+  grid-area: media;
   position: relative;
   overflow: hidden;
   min-height: 330px;
@@ -271,6 +273,7 @@ a {
 }
 
 .video-info {
+  grid-area: info;
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -412,6 +415,9 @@ a {
 
   .result-card {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      'info'
+      'media';
   }
 
   .cover-wrap,
@@ -456,6 +462,7 @@ a {
 }
 
 .image-gallery {
+  grid-area: media;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
