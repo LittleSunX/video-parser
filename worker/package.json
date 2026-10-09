@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev --port 8787",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "deploy": "wrangler deploy"
+    "deploy": "node ../scripts/release-worker.mjs --deploy"
   },
   "devDependencies": {
     "typescript": "~5.9.3",

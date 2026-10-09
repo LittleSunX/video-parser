@@ -1,0 +1,7 @@
+{
+  "samples": [
+    { "kind": "video", "input": "", "expected": { "images": 0, "livePhotos": 0 } },
+    { "kind": "image", "input": "", "expected": { "images": 1, "livePhotos": 0 } },
+    { "kind": "live-photo", "input": "", "expected": { "images": 3, "livePhotos": 3 } }
+  ]
+}
