@@ -107,9 +107,14 @@ test('incomplete live result continues seeking clean images with at most two act
 test('both occupied slots prevent a third request and cancellation aborts both', async () => {
   vi.useFakeTimers()
   const signals = []
-  const run = vi.fn((signal) => {
-    signals.push(signal)
-    return pending(signal)
+  const run = vi.fn(async (signal, attempts) => {
+    const release = await attempts.acquire(1)
+    try {
+      signals.push(signal)
+      return await pending(signal)
+    } finally {
+      release()
+    }
   })
   const controller = new AbortController()
   const running = runParseStrategies(
@@ -118,7 +123,8 @@ test('both occupied slots prevent a third request and cancellation aborts both',
   )
   const rejected = expect(running).rejects.toHaveProperty('name', 'AbortError')
   await vi.advanceTimersByTimeAsync(1800)
-  expect(run).toHaveBeenCalledTimes(2)
+  expect(run).toHaveBeenCalledTimes(4)
+  expect(signals).toHaveLength(2)
   controller.abort()
   await rejected
   expect(signals.every((signal) => signal.aborted)).toBe(true)
@@ -304,4 +310,43 @@ test('a different fallback music title is not paired with the primary music URL'
   expect(result.cover).toBe('https://images/primary')
   expect(result.musicUrl).toBe('https://audio/primary')
   expect(result.musicTitle).toBeUndefined()
+})
+
+test('preview observers receive separate snapshots without final status and cannot alter quality', async () => {
+  const original = imageResult(false)
+  Object.assign(original.video, {
+    author: 'author',
+    cover: 'cover',
+    musicUrl: 'music',
+    musicTitle: 'title',
+  })
+  const clean = imageResult()
+  const previews = []
+  const result = await runParseStrategies(
+    [
+      { name: 'primary', run: async () => original },
+      { name: 'backup', run: async () => clean },
+    ],
+    undefined,
+    undefined,
+    (video) => {
+      previews.push({ ...video, images: video.images.map((image) => ({ ...image })) })
+      video.images[0].url = 'observer mutation'
+      video.author = 'observer mutation'
+      throw new Error('observer failure')
+    },
+  )
+  expect(previews).toHaveLength(2)
+  expect(previews.every((video) => !('parseStatus' in video) && !('parseReason' in video))).toBe(
+    true,
+  )
+  expect(result).toMatchObject({
+    author: 'author',
+    cover: 'cover',
+    musicUrl: 'music',
+    musicTitle: 'title',
+    parseStatus: 'complete',
+  })
+  expect(result.images).toEqual(clean.video.images)
+  expect(original.video.images[0].url).toBe('https://images/1.jpg')
 })

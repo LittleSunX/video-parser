@@ -24,6 +24,11 @@ export async function readVideoResponse(
     signal?.throwIfAborted()
     throw new Error(httpMessage(response))
   }
+  return readVideoPayload(payload, response)
+}
+
+/** JSON 与渐进结果使用相同的资源和状态校验。 */
+export function readVideoPayload(payload: unknown, response: Response): VideoInfo {
   if (response.status === 429) throw new Error(httpMessage(response))
   if (!payload || typeof payload !== 'object') throw new Error(httpMessage(response))
   const result = payload as Record<string, unknown>

@@ -8,6 +8,7 @@ export async function parseVideo(
   input: string,
   clientSignal?: AbortSignal,
   trace?: Diagnostics,
+  onPreview?: (video: VideoInfo) => void,
 ): Promise<VideoInfo> {
   const controller = new AbortController()
   const timer = setTimeout(
@@ -18,7 +19,7 @@ export async function parseVideo(
     ? AbortSignal.any([clientSignal, controller.signal])
     : controller.signal
   try {
-    const result = await parseWithSignal(input, signal, trace)
+    const result = await parseWithSignal(input, signal, trace, onPreview)
     clientSignal?.throwIfAborted()
     return result
   } catch (error) {
@@ -36,6 +37,7 @@ async function parseWithSignal(
   input: string,
   signal: AbortSignal,
   trace?: Diagnostics,
+  onPreview?: (video: VideoInfo) => void,
 ): Promise<VideoInfo> {
   signal.throwIfAborted()
   const sourceUrl = extractUrl(input)
@@ -62,5 +64,5 @@ async function parseWithSignal(
     throw new AppError('UNSUPPORTED_PLATFORM', '暂不支持该视频平台')
   }
 
-  return parser.parse(resolvedUrl.toString(), signal, trace)
+  return parser.parse(resolvedUrl.toString(), signal, trace, onPreview)
 }

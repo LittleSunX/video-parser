@@ -72,6 +72,7 @@ const DIAGNOSTIC_EVENTS = new Set([
   'parse_selection',
   'parse_first_usable',
   'upstream_attempt',
+  'parse_stream_complete',
 ])
 const UPSTREAM_STRATEGIES = new Set(['web-detail', 'mobile-feed', 'mobile-ssr', 'page-meta'])
 const UPSTREAM_ENDPOINTS = new Set([
@@ -145,6 +146,7 @@ export function createUpstreamAttempt(
   const timings = { waitMs: 0, readMs: 0, extractMs: 0 }
   let phase: 'waitMs' | 'readMs' | 'extractMs' = 'waitMs'
   let status: number | undefined
+  let upstream: Response | undefined
   let result: UpstreamResult | undefined
   let finished = false
   async function measure<T>(name: 'waitMs' | 'readMs', operation: () => Promise<T>): Promise<T> {
@@ -159,6 +161,7 @@ export function createUpstreamAttempt(
   return {
     async response(operation: () => Promise<Response>) {
       const response = await measure('waitMs', operation)
+      upstream = response
       status = response.status
       return response
     },
@@ -198,6 +201,8 @@ export function createUpstreamAttempt(
     finish() {
       if (finished) return
       finished = true
+      // Failed HTTP responses are not consumed by the parser. Cancel before releasing its permit.
+      if (upstream && !upstream.bodyUsed) void upstream.body?.cancel().catch(() => {})
       trace?.emit('upstream_attempt', {
         strategy,
         endpoint,
@@ -259,7 +264,11 @@ export function createDiagnostics(metadata?: VersionMetadata): Diagnostics {
       event = DIAGNOSTIC_EVENTS.has(event) ? event : 'unknown_event'
       fields = safeFields(fields)
       // Selection durations start at the strategy runner; this includes input/resolve time too.
-      if (event === 'parse_first_usable' || event === 'parse_selection')
+      if (
+        event === 'parse_first_usable' ||
+        event === 'parse_selection' ||
+        event === 'parse_stream_complete'
+      )
         fields.sinceRequestMs = Math.max(0, Date.now() - started)
       const metric =
         event === 'request_response'
