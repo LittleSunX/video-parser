@@ -13,6 +13,11 @@ const {
   notice,
   canSubmit,
   livePhotoCount,
+  preferredDownloadCount,
+  originalDownloadCount,
+  preferredDownloadLabel,
+  originalDownloadLabel,
+  hasArchiveDownloads,
   parseWarning,
   imageQualityNotice,
   handleParse,
@@ -185,28 +190,22 @@ function platformName(platform: VideoInfo['platform']) {
             取消下载
           </button>
           <button
-            v-if="video.mediaType === 'image' && video.images?.length"
+            v-if="video.mediaType === 'image' && preferredDownloadCount"
             class="download-button"
             type="button"
             :disabled="loading || bufferBusy || batchDownloading || !!batchPart || batchCanContinue"
             @click="handleDownloadAllPreferred"
           >
-            {{
-              livePhotoCount > 0
-                ? '打包下载全部（动态优先）'
-                : video.images?.every((asset) => asset.watermarkFree)
-                  ? '打包下载全部无水印原图'
-                  : '打包下载全部高清原图'
-            }}
+            {{ preferredDownloadLabel }}
           </button>
           <button
-            v-if="video.mediaType === 'image' && livePhotoCount > 0"
+            v-if="video.mediaType === 'image' && livePhotoCount > 0 && originalDownloadCount"
             class="secondary-button"
             type="button"
             :disabled="loading || bufferBusy || batchDownloading || !!batchPart || batchCanContinue"
             @click="handleDownloadAllOriginals"
           >
-            打包下载全部原图
+            {{ originalDownloadLabel }}
           </button>
           <button
             v-if="video.mediaType === 'video' && video.videoUrl"
@@ -257,7 +256,7 @@ function platformName(platform: VideoInfo['platform']) {
           @reparse="handleParse"
         />
 
-        <p v-if="video.mediaType === 'image'" class="download-tip">
+        <p v-if="video.mediaType === 'image' && hasArchiveDownloads" class="download-tip">
           批量下载保存为 ZIP，每包媒体内容最多
           {{ batchPartLimitMiB }} MB，超出会分包保存；单个文件超过 {{ batchPartLimitMiB }} MB
           请逐项下载。
@@ -325,7 +324,7 @@ function platformName(platform: VideoInfo['platform']) {
         >
           取消下载并释放暂存文件
         </button>
-        <p v-if="video.mediaType === 'image'" class="download-tip">
+        <p v-if="video.mediaType === 'image' && hasArchiveDownloads" class="download-tip">
           小作品自动保存一包；大作品请逐包点击保存，再继续下一包。中途失败可重试未完成项。当前 ZIP
           可在 30 秒内再次保存；开始新下载会释放上一份暂存。实际保存状态请查看浏览器下载列表。
         </p>

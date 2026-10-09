@@ -260,15 +260,17 @@ test('clearing a result aborts batch fetching without saving a partial archive',
 test('batch falls back to proxy and never saves an incomplete archive on failure', async () => {
   const { clicks, blobs } = mockBrowserSave()
   const { app } = createApp()
-  app.video.value = { images: [{ url: 'https://image/1' }] }
+  app.video.value = { images: [{ url: 'https://image/1' }, { url: 'https://image/2' }] }
   global.fetch = async (url) => {
     if (!url.startsWith('https://proxy')) throw new TypeError('CORS')
     return new Response('image', { headers: { 'Content-Type': 'image/jpeg' } })
   }
   await app.handleDownloadAllOriginals()
   assert.equal(clicks.length, 1)
-  assert.deepEqual(Object.keys(unzipSync(new Uint8Array(await blobs[0].arrayBuffer()))), ['0.jpg'])
-  app.video.value.images.push({ url: 'https://image/2' })
+  assert.deepEqual(Object.keys(unzipSync(new Uint8Array(await blobs[0].arrayBuffer()))), [
+    '0.jpg',
+    '1.jpg',
+  ])
   global.fetch = async (url) => {
     if (url.includes('2')) throw new Error('offline')
     return new Response('image', { headers: { 'Content-Type': 'image/jpeg' } })
@@ -301,6 +303,255 @@ test('mixed batches retain still images and reject oversized responses without s
   assert.equal(clicks.length, 1)
   assert.match(app.batchProgress.value, /32 MB/)
   assert.equal(app.batchDownloading.value, false)
+})
+
+test('a single live photo downloads MP4 and its still directly while preserving metadata and warnings', async () => {
+  const { clicks, blobs } = mockBrowserSave()
+  const fetch = vi.fn()
+  const pack = vi.spyOn(mediaArchive, 'createMediaArchive')
+  global.fetch = fetch
+  const parsed = {
+    mediaType: 'image',
+    title: '见过鲨鱼的眼眸吗？',
+    author: '一舟同人',
+    cover: 'https://images/cover.jpg',
+    musicTitle: '作品背景音乐',
+    musicUrl: 'https://music/example.mp3',
+    images: [{ url: 'https://images/still.jpg', livePhotoUrl: 'https://live/photo.mp4' }],
+    imagesComplete: false,
+    parseStatus: 'unverified',
+    parseReason: 'exhausted',
+  }
+  const { app, downloads } = createApp(async () => parsed)
+  app.input.value = url
+  await app.handleParse()
+  const warning = app.parseWarning.value
+  assert.notEqual(warning, '')
+  assert.equal(app.preferredDownloadCount.value, 1)
+  assert.equal(app.originalDownloadCount.value, 1)
+  assert.equal(app.preferredDownloadLabel.value, '下载动态视频')
+  assert.equal(app.originalDownloadLabel.value, '下载高清原图')
+  assert.equal(app.hasArchiveDownloads.value, false)
+  await app.handleDownloadAllPreferred()
+  await app.handleDownloadAllOriginals()
+  assert.deepEqual(downloads, [
+    { url: 'https://live/photo.mp4', filename: '0.mp4' },
+    { url: 'https://images/still.jpg', filename: '0.jpg' },
+  ])
+  assert.equal(fetch.mock.calls.length, 0)
+  assert.equal(pack.mock.calls.length, 0)
+  assert.equal(clicks.length, 0)
+  assert.equal(blobs.length, 0)
+  assert.equal(app.batchDownloading.value, false)
+  assert.deepEqual(app.batchItems.value, [])
+  assert.equal(app.batchPart.value, null)
+  assert.equal(app.canSaveBatchAgain.value, false)
+  assert.equal(app.downloadState.value, 'fallback')
+  assert.match(app.downloadStatus.value, /浏览器下载列表/)
+  assert.equal(app.parseWarning.value, warning)
+  assert.deepEqual(app.video.value, parsed)
+})
+
+test('single-file preview keeps download labels visible but cannot download until final selection', async () => {
+  const fetch = vi.fn()
+  global.fetch = fetch
+  const parsed = {
+    mediaType: 'image',
+    images: [{ url: 'https://images/preview.jpg', livePhotoUrl: 'https://live/preview.mp4' }],
+  }
+  let finish
+  const { app, downloads } = createApp(
+    (_input, _signal, onPreview) =>
+      new Promise((resolve) => {
+        finish = resolve
+        onPreview(parsed)
+      }),
+  )
+  app.input.value = url
+  const running = app.handleParse()
+  assert.equal(app.previewing.value, true)
+  assert.equal(app.loading.value, true)
+  assert.equal(app.preferredDownloadCount.value, 1)
+  assert.equal(app.originalDownloadCount.value, 1)
+  assert.equal(app.preferredDownloadLabel.value, '下载动态视频')
+  assert.equal(app.originalDownloadLabel.value, '下载高清原图')
+  assert.equal(app.hasArchiveDownloads.value, false)
+  await app.handleDownloadAllPreferred()
+  await app.handleDownloadAllOriginals()
+  assert.deepEqual(downloads, [])
+  assert.equal(fetch.mock.calls.length, 0)
+  finish({
+    ...parsed,
+    images: [{ url: 'https://images/final.jpg', livePhotoUrl: 'https://live/final.mp4' }],
+    imagesComplete: true,
+  })
+  await running
+  assert.equal(app.previewing.value, false)
+  assert.equal(app.loading.value, false)
+  await app.handleDownloadAllPreferred()
+  await app.handleDownloadAllOriginals()
+  assert.deepEqual(downloads, [
+    { url: 'https://live/final.mp4', filename: '0.mp4' },
+    { url: 'https://images/final.jpg', filename: '0.jpg' },
+  ])
+  assert.equal(fetch.mock.calls.length, 0)
+})
+
+test.each([
+  [true, '下载无水印原图'],
+  [false, '下载高清原图'],
+])(
+  'a single still image downloads directly with watermarkFree=%s',
+  async (watermarkFree, label) => {
+    const fetch = vi.fn()
+    global.fetch = fetch
+    const { app, downloads } = createApp()
+    app.video.value = {
+      mediaType: 'image',
+      images: [{ url: 'https://images/only.jpg', watermarkFree }],
+    }
+    assert.equal(app.preferredDownloadLabel.value, label)
+    assert.equal(app.originalDownloadLabel.value, label)
+    assert.equal(app.hasArchiveDownloads.value, false)
+    await app.handleDownloadAllPreferred()
+    await app.handleDownloadAllOriginals()
+    assert.deepEqual(downloads, [
+      { url: 'https://images/only.jpg', filename: '0.jpg' },
+      { url: 'https://images/only.jpg', filename: '0.jpg' },
+    ])
+    assert.equal(fetch.mock.calls.length, 0)
+    assert.equal(app.batchProgress.value, '')
+  },
+)
+
+test('unavailable entries do not turn one usable live track into an archive or an original download', async () => {
+  const fetch = vi.fn()
+  global.fetch = fetch
+  const { app, downloads } = createApp()
+  app.video.value = {
+    mediaType: 'image',
+    images: [{ url: '' }, { url: '', livePhotoUrl: 'https://live/only.mp4' }, {}],
+    imagesComplete: false,
+    parseStatus: 'unverified',
+    parseReason: 'timeout',
+  }
+  assert.equal(app.preferredDownloadCount.value, 1)
+  assert.equal(app.originalDownloadCount.value, 0)
+  assert.equal(app.hasArchiveDownloads.value, false)
+  await app.handleDownloadAllPreferred()
+  await app.handleDownloadAllOriginals()
+  assert.deepEqual(downloads, [{ url: 'https://live/only.mp4', filename: '1.mp4' }])
+  assert.equal(fetch.mock.calls.length, 0)
+  assert.equal(app.batchDownloading.value, false)
+  assert.match(app.parseWarning.value, /超时/)
+})
+
+test('mixed resources archive two preferred files but download their only still directly', async () => {
+  const { clicks, blobs } = mockBrowserSave()
+  const requests = []
+  global.fetch = async (request) => {
+    requests.push(request)
+    return new Response('media', {
+      headers: { 'Content-Type': request.includes('live') ? 'video/mp4' : 'image/jpeg' },
+    })
+  }
+  const { app, downloads } = createApp()
+  app.video.value = {
+    mediaType: 'image',
+    images: [
+      { url: '', livePhotoUrl: 'https://live/1' },
+      { url: 'https://image/2', watermarkFree: true },
+      { url: '' },
+    ],
+  }
+  assert.equal(app.preferredDownloadCount.value, 2)
+  assert.equal(app.originalDownloadCount.value, 1)
+  assert.equal(app.hasArchiveDownloads.value, true)
+  assert.equal(app.preferredDownloadLabel.value, '打包下载全部（动态优先）')
+  assert.equal(app.originalDownloadLabel.value, '下载无水印原图')
+  await app.handleDownloadAllOriginals()
+  assert.deepEqual(downloads, [{ url: 'https://image/2', filename: '1.jpg' }])
+  assert.deepEqual(requests, [])
+  await app.handleDownloadAllPreferred()
+  assert.deepEqual(requests, ['https://live/1', 'https://image/2'])
+  assert.equal(downloads.length, 1)
+  assert.equal(clicks.length, 1)
+  assert.deepEqual(Object.keys(unzipSync(new Uint8Array(await blobs[0].arrayBuffer()))), [
+    '0.mp4',
+    '1.jpg',
+  ])
+})
+
+test('an image result without any available files never starts a download', async () => {
+  const fetch = vi.fn()
+  global.fetch = fetch
+  const { app, downloads } = createApp()
+  app.video.value = { mediaType: 'image', images: [{ url: '' }, {}] }
+  assert.equal(app.preferredDownloadCount.value, 0)
+  assert.equal(app.originalDownloadCount.value, 0)
+  assert.equal(app.hasArchiveDownloads.value, false)
+  await app.handleDownloadAllPreferred()
+  await app.handleDownloadAllOriginals()
+  assert.deepEqual(downloads, [])
+  assert.equal(fetch.mock.calls.length, 0)
+  assert.equal(app.batchDownloading.value, false)
+  assert.equal(app.bufferBusy.value, false)
+})
+
+test('single-file image actions respect an active buffer task and work after cancellation', async () => {
+  const fetch = vi.fn((_request, options) => hangUntilAborted(options.signal))
+  global.fetch = fetch
+  const { app, downloads } = createApp()
+  app.video.value = {
+    mediaType: 'image',
+    videoUrl: 'https://cdn/video.mp4',
+    images: [{ url: 'https://image/1', livePhotoUrl: 'https://live/1' }],
+  }
+  const running = app.handleDownloadVideo()
+  await app.handleDownloadAllPreferred()
+  await app.handleDownloadAllOriginals()
+  assert.deepEqual(downloads, [])
+  assert.equal(fetch.mock.calls.length, 1)
+  assert.equal(app.bufferBusy.value, true)
+  assert.match(app.notice.value, /完成或取消当前下载任务/)
+  app.cancelVideoDownload()
+  await running
+  await app.handleDownloadAllPreferred()
+  assert.deepEqual(downloads, [{ url: 'https://live/1', filename: '0.mp4' }])
+  assert.equal(fetch.mock.calls.length, 1)
+  assert.equal(app.bufferBusy.value, false)
+})
+
+test('single-file proxy errors support reparse and ignore errors after switching actions or clearing', async () => {
+  const { app } = createApp()
+  const callbacks = []
+  const dispose = vi.fn()
+  vi.mocked(triggerDownload).mockImplementation((_url, _filename, onError) => {
+    callbacks.push(onError)
+    return dispose
+  })
+  app.video.value = {
+    mediaType: 'image',
+    images: [{ url: 'https://image/1', livePhotoUrl: 'https://live/1' }],
+  }
+  await app.handleDownloadAllPreferred()
+  callbacks[0]({ code: 'MEDIA_UNAVAILABLE', message: '实况资源失效，请重新解析' })
+  assert.equal(app.downloadState.value, 'failed')
+  assert.equal(app.downloadNeedsReparse.value, true)
+  await app.handleDownloadAllOriginals()
+  callbacks[0]({ code: 'MEDIA_UNAVAILABLE', message: '旧实况错误' })
+  assert.equal(app.downloadState.value, 'fallback')
+  assert.equal(app.downloadNeedsReparse.value, false)
+  callbacks[1]({ code: 'RATE_LIMITED', message: '等待 60 秒' })
+  assert.equal(app.downloadState.value, 'failed')
+  assert.equal(app.downloadNeedsReparse.value, false)
+  assert.equal(app.downloadStatus.value, '等待 60 秒')
+  await app.handleDownloadAllPreferred()
+  app.handleClear()
+  assert.equal(dispose.mock.calls.length, 1)
+  callbacks[2]({ code: 'MEDIA_UNAVAILABLE', message: '清空后的旧错误' })
+  assert.equal(app.downloadStatus.value, '')
+  assert.equal(app.downloadNeedsReparse.value, false)
 })
 
 test('cancelled parse cannot overwrite a newer parse result', async () => {
@@ -626,7 +877,7 @@ test('discarding a failed batch clears cached files before the next attempt', as
 test('batch distinguishes expired resources and size limits from retryable network errors', async () => {
   const { clicks } = mockBrowserSave()
   const { app } = createApp()
-  app.video.value = { images: [{ url: 'https://image/1' }] }
+  app.video.value = { images: [{ url: 'https://image/1' }, { url: 'https://image/2' }] }
   global.fetch = async () => new Response('expired', { status: 403 })
   await app.handleDownloadAllOriginals()
   assert.match(app.batchProgress.value, /重新解析/)
@@ -735,7 +986,7 @@ test.each(['video', 'music', 'cover', 'zip'])(
       videoUrl: 'https://cdn/video.mp4',
       musicUrl: 'https://cdn/music.mp3',
       cover: 'https://cdn/cover.jpg',
-      images: [{ url: 'https://cdn/image.jpg' }],
+      images: [{ url: 'https://cdn/image.jpg' }, { url: 'https://cdn/second.jpg' }],
     }
     const start =
       kind === 'video'
@@ -760,7 +1011,7 @@ test.each(['video', 'music', 'cover', 'zip'])(
     assert.equal(clicks[1].href, clicks[0].href)
     assert.equal(clicks[1].download, clicks[0].download)
     assert.equal(blobs.length, 1)
-    assert.equal(fetch.mock.calls.length, 1)
+    assert.equal(fetch.mock.calls.length, kind === 'zip' ? 2 : 1)
     assert.equal(pack.mock.calls.length, kind === 'zip' ? 1 : 0)
   },
 )
@@ -800,7 +1051,7 @@ test.each(['video', 'music', 'cover', 'zip'])(
       videoUrl: 'https://cdn/video.mp4',
       musicUrl: 'https://cdn/music.mp3',
       cover: 'https://cdn/cover.jpg',
-      images: [{ url: 'https://cdn/image.jpg' }],
+      images: [{ url: 'https://cdn/image.jpg' }, { url: 'https://cdn/second.jpg' }],
     }
     if (kind === 'video') {
       await app.handleDownloadVideo()
@@ -817,7 +1068,7 @@ test.each(['video', 'music', 'cover', 'zip'])(
       app.saveBatchPart()
     }
     assert.equal(clicks.length, 1)
-    assert.equal(fetch.mock.calls.length, 1)
+    assert.equal(fetch.mock.calls.length, kind === 'zip' ? 2 : 1)
     assert.equal(pack.mock.calls.length, kind === 'zip' ? 1 : 0)
     assert.equal(downloads.length, 0)
   },
@@ -832,7 +1083,7 @@ test('page buffering is mutually exclusive across video, music, cover and ZIP', 
     videoUrl: 'https://cdn/video.mp4',
     musicUrl: 'https://cdn/music.mp3',
     cover: 'https://cdn/cover.jpg',
-    images: [{ url: 'https://cdn/image.jpg' }],
+    images: [{ url: 'https://cdn/image.jpg' }, { url: 'https://cdn/second.jpg' }],
   }
   const running = app.handleDownloadVideo()
   assert.equal(app.bufferBusy.value, true)
