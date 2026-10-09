@@ -474,6 +474,26 @@ GitHub Actions 会在 main 推送和 Pull Request 时，分别在 Windows 与 Li
 
 下载响应成功不代表手机已经保存，真实保存行为需单独验收。
 
+发布工具采用当前完整 Git SHA 给 Worker 标记版本；实际发布要求工作区已提交。`npm run release:worker` 只预览命令，`npm run release:worker -- --dry-run` 仅在本地打包，`npm run deploy:worker` 使用既有 Wrangler 登录或环境凭据发布。根目录与 Worker workspace 的部署入口都使用同一版本检查。
+
+合并、通过 `npm run check` 后，先发布 Worker，再从同一个提交发布前端，随后核对两个服务：
+
+```bash
+npm run release:check -- --frontend https://your-frontend-domain.example --worker https://your-worker-domain.example --commit <完整Git-SHA>
+```
+
+缺少版本 tag、服务版本不同、版本接口不可读或时间无效都会失败；不会把健康接口的 HTTP 200 当作版本匹配。前后端独立发布的短暂错配期间，旧 JSON 协议仍可工作。
+
+复制 `scripts/acceptance-samples.example.json` 到本地目录或已忽略的 `docs/`，填写不同普通视频、图文和实况的真实分享文案、预期数量、作品 ID，以及需保留的元信息与无水印数量下限。真实清单无需提交。发布后执行：
+
+```bash
+npm run release:acceptance -- --worker https://your-worker-domain.example --samples <本地样本清单.json>
+```
+
+验收顺序解析三类样本，核对版本、元信息、图片及动态轨数量，并通过下载代理读取代表媒体的 1 KiB 前缀后取消响应；上游忽略 Range 时会报告实际接收的数据块大小，不下载整文件。响应有字节限制及请求/整体期限，遇到限流停止后续样本。`--dry-run` 只检查清单且不联网，`--parse-only` 只执行接口解析。这些检查不代表画面观感、实际整文件保存或手机真机验收。
+
+部署位置变更应使用同版本、独立限流 namespace、无生产路由的隔离 Worker 对照，再决定是否采用；只凭本机耗时不修改生产位置。真机验收应分别在 iPhone Safari、Android 浏览器及应用内浏览器确认普通视频、图片/ZIP、音乐/封面的保存、再次保存、取消及分包操作。
+
 ---
 
 ## ☁️ 部署
