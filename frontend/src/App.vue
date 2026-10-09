@@ -17,6 +17,12 @@ const {
   handleParse,
   cancelParse,
   handleClear,
+  bufferBusy,
+  canSaveVideoAgain,
+  saveVideoAgain,
+  canSaveBatchAgain,
+  saveBatchAgain,
+  batchPartLimitMiB,
   batchDownloading,
   batchProgress,
   batchItems,
@@ -143,7 +149,9 @@ function platformName(platform: VideoInfo['platform']) {
               v-if="asset.livePhotoUrl"
               type="button"
               class="image-download-button primary-image-action"
-              :disabled="loading || batchDownloading || !!batchPart || batchCanContinue"
+              :disabled="
+                loading || bufferBusy || batchDownloading || !!batchPart || batchCanContinue
+              "
               @click="handleDownloadLivePhoto(index)"
             >
               下载动态视频
@@ -152,7 +160,9 @@ function platformName(platform: VideoInfo['platform']) {
               v-if="asset.url"
               type="button"
               class="image-download-button"
-              :disabled="loading || batchDownloading || !!batchPart || batchCanContinue"
+              :disabled="
+                loading || bufferBusy || batchDownloading || !!batchPart || batchCanContinue
+              "
               @click="handleDownloadImage(index)"
             >
               {{ asset.watermarkFree ? '下载无水印原图' : '下载高清原图' }}
@@ -187,7 +197,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'video' && video.videoUrl"
             class="download-button"
             type="button"
-            :disabled="loading || videoDownloading"
+            :disabled="loading || bufferBusy || videoDownloading"
             @click="handleDownloadVideo"
           >
             {{ videoDownloading ? '正在下载…' : '下载视频' }}
@@ -196,7 +206,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'video' && video.videoUrl"
             class="secondary-button"
             type="button"
-            :disabled="loading || videoDownloading"
+            :disabled="loading || bufferBusy || videoDownloading"
             @click="handleProxyDownloadVideo"
           >
             备用下载
@@ -205,7 +215,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'video' && video.videoUrl"
             class="secondary-button"
             type="button"
-            :disabled="loading || videoDownloading"
+            :disabled="loading || bufferBusy || videoDownloading"
             @click="handleOpenVideoLink"
           >
             打开直链
@@ -222,7 +232,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'image' && video.images?.length"
             class="download-button"
             type="button"
-            :disabled="loading || batchDownloading || !!batchPart || batchCanContinue"
+            :disabled="loading || bufferBusy || batchDownloading || !!batchPart || batchCanContinue"
             @click="handleDownloadAllPreferred"
           >
             {{
@@ -237,7 +247,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'image' && livePhotoCount > 0"
             class="secondary-button"
             type="button"
-            :disabled="loading || batchDownloading || !!batchPart || batchCanContinue"
+            :disabled="loading || bufferBusy || batchDownloading || !!batchPart || batchCanContinue"
             @click="handleDownloadAllOriginals"
           >
             打包下载全部原图
@@ -255,7 +265,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.mediaType === 'video' && video.cover"
             class="secondary-button"
             type="button"
-            :disabled="loading || coverDownload.downloading"
+            :disabled="loading || bufferBusy || coverDownload.downloading"
             @click="coverDownload.start"
           >
             {{ coverDownload.downloading ? '正在下载封面…' : '下载封面' }}
@@ -264,7 +274,7 @@ function platformName(platform: VideoInfo['platform']) {
             v-if="video.musicUrl"
             class="secondary-button"
             type="button"
-            :disabled="loading || musicDownload.downloading"
+            :disabled="loading || bufferBusy || musicDownload.downloading"
             @click="musicDownload.start"
           >
             {{ musicDownload.downloading ? '正在下载背景音乐…' : '下载背景音乐' }}
@@ -292,22 +302,39 @@ function platformName(platform: VideoInfo['platform']) {
         />
 
         <p v-if="video.mediaType === 'image'" class="download-tip">
-          批量下载保存为 ZIP，每包媒体内容最多 128 MB，超出会分包保存；单个文件超过 128 MB
+          批量下载保存为 ZIP，每包媒体内容最多
+          {{ batchPartLimitMiB }} MB，超出会分包保存；单个文件超过 {{ batchPartLimitMiB }} MB
           请逐项下载。
         </p>
         <p v-if="video.mediaType === 'image' && batchProgress" class="download-tip" role="status">
           {{ batchProgress }}
         </p>
-        <button v-if="batchPart" class="download-button" type="button" @click="saveBatchPart">
+        <button
+          v-if="batchPart"
+          class="download-button"
+          type="button"
+          :disabled="loading || bufferBusy"
+          @click="saveBatchPart"
+        >
           保存第 {{ batchPart.number }} 包（{{ batchPart.count }} 项，{{
             (batchPart.size / 1024 / 1024).toFixed(1)
           }}
           MB）
         </button>
         <button
+          v-if="canSaveBatchAgain && !batchPart"
+          class="secondary-button"
+          type="button"
+          :disabled="loading || bufferBusy"
+          @click="saveBatchAgain"
+        >
+          再次保存当前 ZIP
+        </button>
+        <button
           v-if="batchCanContinue"
           class="secondary-button"
           type="button"
+          :disabled="loading || bufferBusy"
           @click="continueBatchDownload"
         >
           继续准备下一包
@@ -321,6 +348,7 @@ function platformName(platform: VideoInfo['platform']) {
           v-if="batchCanRetry && !batchDownloading"
           class="secondary-button"
           type="button"
+          :disabled="loading || bufferBusy"
           @click="retryBatchDownload"
         >
           重试未完成项
@@ -331,7 +359,7 @@ function platformName(platform: VideoInfo['platform']) {
           type="button"
           @click="stopBatchDownload"
         >
-          结束批量任务并释放缓存
+          结束批量任务并释放暂存文件
         </button>
         <button
           v-if="batchDownloading"
@@ -339,10 +367,11 @@ function platformName(platform: VideoInfo['platform']) {
           type="button"
           @click="stopBatchDownload"
         >
-          取消下载并释放缓存
+          取消下载并释放暂存文件
         </button>
         <p v-if="video.mediaType === 'image'" class="download-tip">
-          小作品自动保存一包；大作品请逐包点击保存，再继续下一包。中途失败可重试未完成项，实际保存状态请查看浏览器下载列表。
+          小作品自动保存一包；大作品请逐包点击保存，再继续下一包。中途失败可重试未完成项。当前 ZIP
+          可在 30 秒内再次保存；开始新下载会释放上一份暂存。实际保存状态请查看浏览器下载列表。
         </p>
         <div
           v-if="downloadStatus"
@@ -358,6 +387,15 @@ function platformName(platform: VideoInfo['platform']) {
           <strong v-else>正在下载视频</strong>
           <span>{{ downloadStatus }}</span>
           <button
+            v-if="canSaveVideoAgain"
+            class="secondary-button"
+            type="button"
+            :disabled="loading || bufferBusy"
+            @click="saveVideoAgain"
+          >
+            再次保存视频
+          </button>
+          <button
             v-if="downloadNeedsReparse"
             class="secondary-button"
             type="button"
@@ -368,7 +406,8 @@ function platformName(platform: VideoInfo['platform']) {
           </button>
         </div>
         <p v-if="video.mediaType === 'video'" class="download-tip">
-          点击下载后请保持页面打开，接收完成会自动请求保存。若浏览器未保存，可使用备用下载；打开直链则需从播放器菜单手动保存。
+          点击下载后请保持页面打开，接收完成会自动请求保存。若浏览器未保存，可在 30
+          秒内再次保存；也可使用备用下载。打开直链需从播放器菜单手动保存。
         </p>
         <p v-else class="download-tip">
           实况作品会优先提供 MP4 动态轨；只有明确命中无水印字段时才标记“无水印原图”，避免把普通 CDN

@@ -1,5 +1,5 @@
 import { MediaDownloadError, responseDownloadError } from './download-error'
-const MAX_BUFFER_BYTES = 64 * 1024 * 1024
+import { SINGLE_BUFFER_BYTES } from './download-buffer'
 
 interface DownloadOptions {
   signal: AbortSignal
@@ -20,7 +20,7 @@ export async function fetchMediaBlob(
     readTimeoutMs = 15000,
   }: DownloadOptions,
   kind: 'video' | 'image' | 'audio' = 'video',
-  maxBytes = MAX_BUFFER_BYTES,
+  maxBytes = SINGLE_BUFFER_BYTES,
 ): Promise<Blob> {
   const controller = new AbortController()
   const cancel = () => controller.abort(signal.reason)
@@ -115,17 +115,25 @@ export async function downloadDirectVideo(
   saveBlob(blob, filename)
 }
 
-export function saveBlob(blob: Blob, filename: string): void {
-  const blobUrl = URL.createObjectURL(blob)
+export function saveBlob(
+  blob: Blob,
+  filename: string,
+  { objectUrl, retain = false }: { objectUrl?: string; retain?: boolean } = {},
+): string {
+  const blobUrl = objectUrl ?? URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = blobUrl
   anchor.download = filename
+  let handedOff = false
   try {
     document.body.appendChild(anchor)
     anchor.click()
+    handedOff = true
   } finally {
     anchor.remove()
-    // 给移动端下载管理器留出接管 Blob 的时间。
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
+    if (!handedOff && !objectUrl) URL.revokeObjectURL(blobUrl)
+    // 页面任务由 prepared-download 管理同一个 URL；独立调用也不长期积累引用。
+    if (handedOff && !retain) setTimeout(() => URL.revokeObjectURL(blobUrl), 10000)
   }
+  return blobUrl
 }

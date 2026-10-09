@@ -3,12 +3,13 @@ import { createMediaArchive } from './media-archive'
 import { fetchMediaBlob, saveBlob } from './auto-download'
 import { buildDownloadUrl } from './download'
 import { MediaDownloadError } from './download-error'
+import { ZIP_PART_SOURCE_BYTES } from './download-buffer'
 
 export interface DownloadJob {
   url: string
   filename: string
 }
-export const MAX_PART_BYTES = 128 * 1024 * 1024
+export const MAX_PART_BYTES = ZIP_PART_SOURCE_BYTES
 
 export interface BatchItemStatus {
   filename: string
@@ -52,10 +53,13 @@ export function clearBatchSession(session: BatchSession): void {
 }
 
 /** 必须由用户点击触发，逐包交给浏览器保存。 */
-export function saveArchivePart(session: BatchSession): boolean {
+export function saveArchivePart(
+  session: BatchSession,
+  save: (blob: Blob, filename: string) => void = saveBlob,
+): boolean {
   const part = session.part
   if (!part) return false
-  saveBlob(part.blob, part.filename)
+  save(part.blob, part.filename)
   session.part = undefined
   session.partNumber++
   return part.final
@@ -69,6 +73,7 @@ export async function downloadMediaArchive(
   onProgress: (message: string) => void,
   session = createBatchSession(jobs),
   onItems: (items: BatchItemStatus[]) => void = () => {},
+  save: (blob: Blob, filename: string) => void = saveBlob,
 ): Promise<void> {
   if (session.part) return
   let received = [...session.files.values()].reduce((sum, file) => sum + file.size, 0)
@@ -83,15 +88,12 @@ export async function downloadMediaArchive(
       signal,
     )
     signal.throwIfAborted()
-    if (session.partNumber === 1 && final) {
-      saveBlob(blob, filename)
-      session.files.clear()
-      onProgress(`已将 ${jobs.length} / ${jobs.length} 项打包，已请求浏览器保存 ZIP`)
-      return
-    }
     session.part = {
       blob,
-      filename: filename.replace(/\.zip$/i, '') + `_第${session.partNumber}包.zip`,
+      filename:
+        session.partNumber === 1 && final
+          ? filename
+          : filename.replace(/\.zip$/i, '') + `_第${session.partNumber}包.zip`,
       number: session.partNumber,
       count: session.files.size,
       final,
@@ -101,6 +103,11 @@ export async function downloadMediaArchive(
         update(i, 'packed', `已打包到第 ${session.partNumber} 包`)
     }
     session.files.clear()
+    if (session.partNumber === 1 && final) {
+      saveArchivePart(session, save)
+      onProgress(`已将 ${jobs.length} / ${jobs.length} 项打包，已请求浏览器保存 ZIP`)
+      return
+    }
     onProgress(
       `第 ${session.partNumber} 包已准备好（${session.part.count} 项），请点击保存${final ? '，这是最后一包' : '后继续下一包'}`,
     )
@@ -176,7 +183,7 @@ export async function downloadMediaArchive(
         error instanceof MediaDownloadError
           ? error
           : new MediaDownloadError('NETWORK', '下载失败，请重试')
-      const message = `第 ${index + 1} / ${jobs.length} 项获取失败：${reason.message}${reason.code === 'TOO_LARGE' ? '（单项上限 128 MB，大文件请逐项下载）' : ''}`
+      const message = `第 ${index + 1} / ${jobs.length} 项获取失败：${reason.message}${reason.code === 'TOO_LARGE' ? `（单项上限 ${Math.round(session.maxPartBytes / 1024 / 1024)} MB，大文件请逐项下载）` : ''}`
       update(index, 'failed', reason.message)
       throw new MediaDownloadError(reason.code, message)
     }

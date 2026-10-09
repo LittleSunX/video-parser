@@ -1,39 +1,63 @@
 import { onScopeDispose, reactive } from 'vue'
-import { fetchMediaBlob, saveBlob } from '../utils/auto-download'
+import { fetchMediaBlob } from '../utils/auto-download'
 import { buildDownloadUrl, triggerDownload } from '../utils/download'
 import { MediaDownloadError } from '../utils/download-error'
 import { imageFilename } from '../../../shared/media'
+import {
+  createDownloadBufferBudget,
+  PAGE_BUFFER_BUDGET_BYTES,
+  type DownloadBufferBudget,
+} from '../utils/download-buffer'
+import { createPreparedDownload } from '../utils/prepared-download'
 
 interface FileDownloadOptions {
   label: string
   kind: 'audio' | 'image'
   getTarget: () => { url: string; filename: string } | undefined
   showNotice: (message: string, duration?: number) => void
+  bufferBudget?: DownloadBufferBudget
 }
 
 type DownloadState = 'receiving' | 'handed-off' | 'fallback' | 'cancelled' | 'failed'
 
 /** 音乐与封面使用原有代理单次流式请求，读取数据时同步更新进度。 */
-export function useFileDownload({ label, kind, getTarget, showNotice }: FileDownloadOptions) {
+export function useFileDownload({
+  label,
+  kind,
+  getTarget,
+  showNotice,
+  bufferBudget = createDownloadBufferBudget(),
+}: FileDownloadOptions) {
   let activeController: AbortController | undefined
   let nativeDispose: (() => void) | undefined
   let nativeRequestNumber = 0
+  let releaseBuffer: (() => void) | undefined
+  const prepared = createPreparedDownload(() => bufferBudget.retain(owner, 0))
+  const owner = bufferBudget.register(() => {
+    prepared.clear()
+    bufferBudget.retain(owner, 0)
+  })
   const download = reactive({
     downloading: false,
     status: '',
     state: 'receiving' as DownloadState,
     progress: undefined as number | undefined,
     needsReparse: false,
+    canSaveAgain: prepared.canSave,
+    bufferBusy: bufferBudget.busy,
     start,
     cancel,
     reset,
     startBrowserDownload,
+    saveAgain,
   })
 
   function stop() {
     activeController?.abort()
     activeController = undefined
     download.downloading = false
+    releaseBuffer?.()
+    releaseBuffer = undefined
     nativeRequestNumber++
     nativeDispose?.()
     nativeDispose = undefined
@@ -41,6 +65,8 @@ export function useFileDownload({ label, kind, getTarget, showNotice }: FileDown
 
   function reset() {
     stop()
+    prepared.clear()
+    bufferBudget.retain(owner, 0)
     download.status = ''
     download.state = 'receiving'
     download.progress = undefined
@@ -48,7 +74,7 @@ export function useFileDownload({ label, kind, getTarget, showNotice }: FileDown
   }
 
   function cancel() {
-    stop()
+    reset()
     download.state = 'cancelled'
     download.status = '已取消' + label + '下载'
     download.progress = undefined
@@ -58,7 +84,13 @@ export function useFileDownload({ label, kind, getTarget, showNotice }: FileDown
   async function start() {
     const target = getTarget()
     if (!target || download.downloading) return
+    const release = bufferBudget.acquire(owner, PAGE_BUFFER_BUDGET_BYTES)
+    if (!release) {
+      showNotice('请先完成或取消当前下载任务')
+      return
+    }
     reset()
+    releaseBuffer = release
     const controller = new AbortController()
     activeController = controller
     download.downloading = true
@@ -85,9 +117,14 @@ export function useFileDownload({ label, kind, getTarget, showNotice }: FileDown
         kind,
       )
       if (activeController !== controller) return
-      saveBlob(blob, kind === 'image' ? imageFilename(target.filename, blob.type) : target.filename)
+      prepared.prepare(
+        blob,
+        kind === 'image' ? imageFilename(target.filename, blob.type) : target.filename,
+      )
+      bufferBudget.retain(owner, blob.size)
+      prepared.save()
       download.state = 'handed-off'
-      download.status = '已请求浏览器保存，请查看下载列表；若未保存，可使用浏览器下载。'
+      download.status = '已请求浏览器保存，请查看下载列表；未保存时可在 30 秒内再次保存。'
       showNotice(label + '已交给浏览器保存，请查看下载列表', 6000)
     } catch (error) {
       if (controller.signal.aborted || activeController !== controller) return
@@ -102,16 +139,34 @@ export function useFileDownload({ label, kind, getTarget, showNotice }: FileDown
             : label + '下载失败，请重试。'
       showNotice(download.status, 6000)
     } finally {
+      release()
       if (activeController === controller) {
+        releaseBuffer = undefined
         activeController = undefined
         download.downloading = false
       }
     }
   }
 
+  function saveAgain() {
+    if (!getTarget() || download.downloading || bufferBudget.busy.value) return
+    try {
+      if (!prepared.save()) return
+      download.state = 'handed-off'
+      download.status = '已再次请求浏览器保存，请查看下载列表。'
+      showNotice('已再次请求保存' + label, 6000)
+    } catch {
+      showNotice('未能发起保存，请再次点击保存' + label)
+    }
+  }
+
   function startBrowserDownload() {
     const target = getTarget()
     if (!target || download.downloading) return
+    if (!bufferBudget.clearRetained()) {
+      showNotice('请先完成或取消当前下载任务')
+      return
+    }
     reset()
     const requestNumber = ++nativeRequestNumber
     download.state = 'fallback'

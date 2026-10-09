@@ -6,6 +6,8 @@ import { effectScope } from 'vue'
 import { useVideoPage } from '../frontend/src/composables/useVideoPage'
 import { parseVideo as apiParseVideo } from '../frontend/src/api/video'
 import { triggerDownload } from '../frontend/src/utils/download'
+import * as mediaArchive from '../frontend/src/utils/media-archive'
+import { PREPARED_DOWNLOAD_TTL_MS } from '../frontend/src/utils/prepared-download'
 
 vi.mock('../frontend/src/api/video', () => ({ parseVideo: vi.fn() }))
 vi.mock('../frontend/src/utils/download', () => ({
@@ -14,6 +16,8 @@ vi.mock('../frontend/src/utils/download', () => ({
   buildVideoFilename: () => 'video.mp4',
   buildImageFilename: (_video, index) => index + '.jpg',
   buildLivePhotoFilename: (_video, index) => index + '.mp4',
+  buildCoverFilename: () => 'cover.jpg',
+  buildMusicFilename: () => 'music.mp3',
 }))
 import { DouyinParser } from '../worker/src/parsers/douyin.ts'
 import { parseVideo } from '../worker/src/services/parse-service.ts'
@@ -27,6 +31,7 @@ const originalRevokeObjectURL = URL.revokeObjectURL
 const cleanups = []
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup()
+  vi.useRealTimers()
   global.fetch = originalFetch
   global.setTimeout = originalTimeout
   global.window = originalWindow
@@ -178,11 +183,29 @@ function createApp(parseMock = async () => ({})) {
   vi.mocked(triggerDownload).mockImplementation((url, filename) =>
     downloads.push({ url, filename }),
   )
-  global.window = { setTimeout: global.setTimeout, clearTimeout: global.clearTimeout }
+  const listeners = new Map()
+  global.window = {
+    setTimeout: global.setTimeout,
+    clearTimeout: global.clearTimeout,
+    addEventListener(name, listener) {
+      if (!listeners.has(name)) listeners.set(name, new Set())
+      listeners.get(name).add(listener)
+    },
+    removeEventListener(name, listener) {
+      listeners.get(name)?.delete(listener)
+    },
+  }
   const scope = effectScope()
   const app = scope.run(() => useVideoPage())
   cleanups.push(() => scope.stop())
-  return { app, downloads }
+  return {
+    app,
+    downloads,
+    pagehide: () => {
+      for (const listener of [...(listeners.get('pagehide') ?? [])]) listener()
+    },
+    dispose: () => scope.stop(),
+  }
 }
 
 test('batch saves all three dynamic videos in one archive and shares a lock', async () => {
@@ -276,7 +299,7 @@ test('mixed batches retain still images and reject oversized responses without s
     })
   await app.handleDownloadAllPreferred()
   assert.equal(clicks.length, 1)
-  assert.match(app.batchProgress.value, /128 MB/)
+  assert.match(app.batchProgress.value, /32 MB/)
   assert.equal(app.batchDownloading.value, false)
 })
 
@@ -315,10 +338,9 @@ function mockBrowserSave() {
   }
   URL.createObjectURL = (blob) => {
     blobs.push(blob)
-    return 'blob:test-video'
+    return 'blob:test-video' + (blobs.length === 1 ? '' : '-' + blobs.length)
   }
   URL.revokeObjectURL = (url) => revoked.push(url)
-  global.setTimeout = (fn, ms, ...args) => originalTimeout(fn, ms === 60000 ? 0 : ms, ...args)
   return { clicks, blobs, revoked }
 }
 
@@ -618,7 +640,7 @@ test('batch distinguishes expired resources and size limits from retryable netwo
   }
   await app.handleDownloadAllOriginals()
   assert.equal(requests, 1)
-  assert.match(app.batchProgress.value, /128 MB/)
+  assert.match(app.batchProgress.value, /32 MB/)
   assert.equal(app.batchCanRetry.value, false)
   assert.equal(clicks.length, 0)
 })
@@ -690,4 +712,252 @@ test('batch UI pauses at each package until save and continue are clicked', asyn
   assert.match(app.batchProgress.value, /全部分包/)
   assert.deepEqual(Object.keys(unzipSync(new Uint8Array(await blobs[0].arrayBuffer()))), ['0.jpg'])
   assert.deepEqual(Object.keys(unzipSync(new Uint8Array(await blobs[1].arrayBuffer()))), ['1.jpg'])
+})
+
+test.each(['video', 'music', 'cover', 'zip'])(
+  '%s can be saved again synchronously without a new GET or ZIP',
+  async (kind) => {
+    const { clicks, blobs } = mockBrowserSave()
+    const pack = vi.spyOn(mediaArchive, 'createMediaArchive')
+    const fetch = vi.fn(
+      async () =>
+        new Response(new Uint8Array([1, 2, 3]), {
+          headers: {
+            'Content-Type':
+              kind === 'music' ? 'audio/mpeg' : kind === 'video' ? 'video/mp4' : 'image/jpeg',
+          },
+        }),
+    )
+    global.fetch = fetch
+    const { app } = createApp()
+    app.video.value = {
+      mediaType: kind === 'zip' ? 'image' : 'video',
+      videoUrl: 'https://cdn/video.mp4',
+      musicUrl: 'https://cdn/music.mp3',
+      cover: 'https://cdn/cover.jpg',
+      images: [{ url: 'https://cdn/image.jpg' }],
+    }
+    const start =
+      kind === 'video'
+        ? app.handleDownloadVideo
+        : kind === 'music'
+          ? app.musicDownload.start
+          : kind === 'cover'
+            ? app.coverDownload.start
+            : app.handleDownloadAllOriginals
+    const again =
+      kind === 'video'
+        ? app.saveVideoAgain
+        : kind === 'music'
+          ? app.musicDownload.saveAgain
+          : kind === 'cover'
+            ? app.coverDownload.saveAgain
+            : app.saveBatchAgain
+    await start()
+    assert.equal(clicks.length, 1)
+    again()
+    assert.equal(clicks.length, 2)
+    assert.equal(clicks[1].href, clicks[0].href)
+    assert.equal(clicks[1].download, clicks[0].download)
+    assert.equal(blobs.length, 1)
+    assert.equal(fetch.mock.calls.length, 1)
+    assert.equal(pack.mock.calls.length, kind === 'zip' ? 1 : 0)
+  },
+)
+
+test.each(['video', 'music', 'cover', 'zip'])(
+  'a failed %s browser handoff keeps received bytes for a save click',
+  async (kind) => {
+    const { clicks } = mockBrowserSave()
+    const createElement = global.document.createElement
+    let fail = true
+    global.document.createElement = () => {
+      const anchor = createElement()
+      const click = anchor.click
+      anchor.click = function () {
+        if (fail) {
+          fail = false
+          throw new Error('browser refused')
+        }
+        click.call(this)
+      }
+      return anchor
+    }
+    const pack = vi.spyOn(mediaArchive, 'createMediaArchive')
+    const fetch = vi.fn(
+      async () =>
+        new Response('media', {
+          headers: {
+            'Content-Type':
+              kind === 'video' ? 'video/mp4' : kind === 'music' ? 'audio/mpeg' : 'image/jpeg',
+          },
+        }),
+    )
+    global.fetch = fetch
+    const { app, downloads } = createApp()
+    app.video.value = {
+      mediaType: kind === 'zip' ? 'image' : 'video',
+      videoUrl: 'https://cdn/video.mp4',
+      musicUrl: 'https://cdn/music.mp3',
+      cover: 'https://cdn/cover.jpg',
+      images: [{ url: 'https://cdn/image.jpg' }],
+    }
+    if (kind === 'video') {
+      await app.handleDownloadVideo()
+      assert.equal(app.canSaveVideoAgain.value, true)
+      app.saveVideoAgain()
+    } else if (kind === 'music' || kind === 'cover') {
+      const download = kind === 'music' ? app.musicDownload : app.coverDownload
+      await download.start()
+      assert.equal(download.canSaveAgain, true)
+      download.saveAgain()
+    } else {
+      await app.handleDownloadAllOriginals()
+      assert.equal(app.batchPart.value.final, true)
+      app.saveBatchPart()
+    }
+    assert.equal(clicks.length, 1)
+    assert.equal(fetch.mock.calls.length, 1)
+    assert.equal(pack.mock.calls.length, kind === 'zip' ? 1 : 0)
+    assert.equal(downloads.length, 0)
+  },
+)
+
+test('page buffering is mutually exclusive across video, music, cover and ZIP', async () => {
+  mockBrowserSave()
+  const fetch = vi.fn((_url, options) => hangUntilAborted(options.signal))
+  global.fetch = fetch
+  const { app } = createApp()
+  app.video.value = {
+    videoUrl: 'https://cdn/video.mp4',
+    musicUrl: 'https://cdn/music.mp3',
+    cover: 'https://cdn/cover.jpg',
+    images: [{ url: 'https://cdn/image.jpg' }],
+  }
+  const running = app.handleDownloadVideo()
+  assert.equal(app.bufferBusy.value, true)
+  await app.musicDownload.start()
+  await app.coverDownload.start()
+  await app.handleDownloadAllOriginals()
+  assert.equal(fetch.mock.calls.length, 1)
+  app.cancelVideoDownload()
+  await running
+  assert.equal(app.bufferBusy.value, false)
+  fetch.mockResolvedValueOnce(new Response('music', { headers: { 'Content-Type': 'audio/mpeg' } }))
+  await app.musicDownload.start()
+  assert.equal(fetch.mock.calls.length, 2)
+  assert.equal(app.musicDownload.canSaveAgain, true)
+})
+
+test.each(['clear', 'reparse', 'pagehide', 'dispose', 'expiry'])(
+  'prepared video is released on %s and cannot be saved again',
+  async (action) => {
+    vi.useFakeTimers()
+    const { clicks, revoked } = mockBrowserSave()
+    const fetch = vi.fn(
+      async () => new Response('video', { headers: { 'Content-Type': 'video/mp4' } }),
+    )
+    global.fetch = fetch
+    const { app, pagehide, dispose } = createApp()
+    app.video.value = { videoUrl: 'https://cdn/video.mp4' }
+    await app.handleDownloadVideo()
+    assert.equal(app.canSaveVideoAgain.value, true)
+    if (action === 'clear') app.handleClear()
+    if (action === 'reparse') {
+      app.input.value = url
+      await app.handleParse()
+    }
+    if (action === 'pagehide') pagehide()
+    if (action === 'dispose') dispose()
+    if (action === 'expiry') await vi.advanceTimersByTimeAsync(PREPARED_DOWNLOAD_TTL_MS)
+    assert.equal(app.canSaveVideoAgain.value, false)
+    app.saveVideoAgain()
+    assert.equal(clicks.length, 1)
+    assert.deepEqual(revoked, ['blob:test-video'])
+    assert.equal(fetch.mock.calls.length, 1)
+  },
+)
+
+test('starting another task releases the previous saved Blob URL instead of accumulating files', async () => {
+  const { blobs, revoked } = mockBrowserSave()
+  global.fetch = async (request) =>
+    new Response('media', {
+      headers: {
+        'Content-Type': request.includes('music')
+          ? 'audio/mpeg'
+          : request.includes('cover')
+            ? 'image/jpeg'
+            : 'video/mp4',
+      },
+    })
+  const { app } = createApp()
+  app.video.value = {
+    videoUrl: 'https://cdn/video.mp4',
+    musicUrl: 'https://cdn/music.mp3',
+    cover: 'https://cdn/cover.jpg',
+  }
+  await app.handleDownloadVideo()
+  await app.coverDownload.start()
+  assert.equal(app.canSaveVideoAgain.value, false)
+  assert.equal(app.coverDownload.canSaveAgain, true)
+  await app.musicDownload.start()
+  assert.equal(app.coverDownload.canSaveAgain, false)
+  assert.equal(app.musicDownload.canSaveAgain, true)
+  assert.equal(blobs.length, 3)
+  assert.deepEqual(revoked, ['blob:test-video', 'blob:test-video-2'])
+})
+
+test('saved ZIP parts can be saved again before continuing, and expiry does not discard completed progress', async () => {
+  vi.useFakeTimers()
+  const createSession = batchArchive.createBatchSession
+  vi.spyOn(batchArchive, 'createBatchSession').mockImplementation((jobs) => createSession(jobs, 6))
+  const { clicks, blobs, revoked } = mockBrowserSave()
+  const pack = vi.spyOn(mediaArchive, 'createMediaArchive')
+  const fetch = vi.fn(
+    async () =>
+      new Response(new Uint8Array(6), {
+        headers: { 'Content-Type': 'image/jpeg', 'Content-Length': '6' },
+      }),
+  )
+  global.fetch = fetch
+  const { app } = createApp()
+  app.video.value = { images: [1, 2].map((i) => ({ url: 'https://image/' + i })) }
+  await app.handleDownloadAllOriginals()
+  app.saveBatchPart()
+  app.saveBatchAgain()
+  assert.equal(clicks.length, 2)
+  assert.equal(fetch.mock.calls.length, 1)
+  assert.equal(pack.mock.calls.length, 1)
+  assert.equal(blobs.length, 1)
+  await vi.advanceTimersByTimeAsync(PREPARED_DOWNLOAD_TTL_MS)
+  assert.equal(app.canSaveBatchAgain.value, false)
+  assert.equal(app.batchCanContinue.value, true)
+  assert.deepEqual(revoked, ['blob:test-video'])
+  await app.continueBatchDownload()
+  assert.equal(app.batchPart.value.number, 2)
+  assert.deepEqual(
+    fetch.mock.calls.map(([request]) => request),
+    ['https://image/1', 'https://image/2'],
+  )
+  app.saveBatchPart()
+  assert.equal(clicks.length, 3)
+  assert.equal(pack.mock.calls.length, 2)
+})
+
+test('failed batch partial files have a short task lifetime', async () => {
+  vi.useFakeTimers()
+  mockBrowserSave()
+  global.fetch = async (request) => {
+    if (request.includes('2')) throw new TypeError('offline')
+    return new Response('image', { headers: { 'Content-Type': 'image/jpeg' } })
+  }
+  const { app } = createApp()
+  app.video.value = { images: [1, 2].map((i) => ({ url: 'https://image/' + i })) }
+  await app.handleDownloadAllOriginals()
+  assert.equal(app.batchHasCache.value, true)
+  assert.equal(app.batchCanRetry.value, true)
+  await vi.advanceTimersByTimeAsync(PREPARED_DOWNLOAD_TTL_MS)
+  assert.equal(app.batchHasCache.value, false)
+  assert.equal(app.batchCanRetry.value, false)
+  assert.match(app.batchProgress.value, /暂存已到期/)
 })
