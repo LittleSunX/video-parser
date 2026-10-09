@@ -4,10 +4,15 @@ import type { VideoInfo } from '../../types/video'
 import type { ParsedMediaResult } from './types'
 import { hasAllImageResources, isHighConfidenceImageResult, mergeImageAssets } from './images'
 import { createAttemptScheduler, type AttemptScheduler } from './attempt-scheduler'
+import { mergeKnownResults, mergeMetadata } from './ordered-candidates'
 
 interface ParseStrategy {
   name: string
-  run: (signal: AbortSignal, attempts: AttemptScheduler) => Promise<ParsedMediaResult>
+  run: (
+    signal: AbortSignal,
+    attempts: AttemptScheduler,
+    retain: (result: ParsedMediaResult | undefined) => void,
+  ) => Promise<ParsedMediaResult>
 }
 
 /** 主策略领先 600 ms；新策略优先于重试，单次上游尝试最多两个在途。 */
@@ -21,8 +26,13 @@ export function runParseStrategies(
   const strategiesStarted = Date.now()
   return new Promise((resolve, reject) => {
     const controller = new AbortController()
-    const attempts = createAttemptScheduler(controller.signal, launch)
+    const attempts = createAttemptScheduler(
+      controller.signal,
+      launch,
+      () => next >= strategies.length,
+    )
     const failures: string[] = []
+    const retained = new Map<string, ParsedMediaResult>()
     let bestImage: VideoInfo | undefined
     let imagesComplete = false
     let next = 0
@@ -37,6 +47,7 @@ export function runParseStrategies(
       reason: 'complete' | 'exhausted' | 'timeout' | 'cancelled' = 'complete',
     ) {
       if (settled) return
+      if (reason !== 'cancelled') video = preserveCandidates(video)
       settled = true
       trace?.emit('parse_selection', {
         reason,
@@ -80,6 +91,14 @@ export function runParseStrategies(
       }
     }
 
+    function preserveCandidates(video?: VideoInfo, includeMetadata = true): VideoInfo | undefined {
+      let result = video ? { video, imagesComplete } : undefined
+      for (const candidate of retained.values())
+        result = mergeKnownResults(result, candidate, includeMetadata)
+      if (result) imagesComplete = result.imagesComplete
+      return result?.video
+    }
+
     function preview(video: VideoInfo) {
       if (!onPreview) return
       const snapshot = {
@@ -113,9 +132,13 @@ export function runParseStrategies(
         })
       }
       if (video.videoUrl && !bestImage) {
-        preview(video)
-        finish(video)
-        return
+        const known = preserveCandidates(video, false)
+        if (!known?.images?.length) {
+          preview(video)
+          finish(video)
+          return
+        }
+        bestImage = known
       }
       if (bestImage) bestImage = mergeMetadata(bestImage, video)
       if (!video.images?.length) {
@@ -137,11 +160,12 @@ export function runParseStrategies(
         if (!result.imagesComplete || images.length > previous.length) imagesComplete = false
         if (result.imagesComplete && video.images.length >= images.length) imagesComplete = true
       }
+      bestImage = preserveCandidates(bestImage, false) ?? bestImage
       preview(bestImage)
       // 完整性仍由当前策略确认；合并只补充已识别资源，不推测缺失项。
       if (
         video.images.length >= (bestImage.images?.length ?? 0) &&
-        isHighConfidenceImageResult({ ...result, video: bestImage })
+        isHighConfidenceImageResult({ ...result, video: bestImage, imagesComplete })
       )
         finish(bestImage)
     }
@@ -149,11 +173,16 @@ export function runParseStrategies(
     function launch() {
       if (settled || next >= strategies.length) return
       const strategy = strategies[next++]
+      const attemptScope = attempts.scope()
       active++
       const started = Date.now()
       void (async () => {
         try {
-          const result = await strategy.run(controller.signal, attempts)
+          const result = await strategy.run(controller.signal, attemptScope, (candidate) => {
+            if (settled) return
+            if (candidate) retained.set(strategy.name, candidate)
+            else retained.delete(strategy.name)
+          })
           trace?.emit('strategy_complete', {
             strategy: strategy.name,
             outcome: settled ? 'cancelled' : 'success',
@@ -161,7 +190,10 @@ export function runParseStrategies(
             imagesComplete: result.imagesComplete,
             ...mediaCounts(result.video),
           })
-          if (!settled) accept(result, strategy.name)
+          if (!settled) {
+            retained.delete(strategy.name)
+            accept(result, strategy.name)
+          }
         } catch (error) {
           trace?.emit('strategy_complete', {
             strategy: strategy.name,
@@ -188,6 +220,7 @@ export function runParseStrategies(
                 'exhausted',
               )
           }
+          attemptScope.releaseHolds()
         }
       })()
       schedule()
@@ -202,22 +235,4 @@ export function runParseStrategies(
         'exhausted',
       )
   })
-}
-
-function mergeMetadata(current: VideoInfo, incoming: VideoInfo): VideoInfo {
-  // 音乐地址和标题作为一组补充，避免把不同接口的两首音乐配在一起。
-  const musicTitle =
-    !current.musicUrl && incoming.musicUrl
-      ? incoming.musicTitle
-      : current.musicTitle ||
-        (!incoming.musicUrl || incoming.musicUrl === current.musicUrl
-          ? incoming.musicTitle
-          : undefined)
-  return {
-    ...current,
-    author: current.author || incoming.author,
-    cover: current.cover || incoming.cover,
-    musicUrl: current.musicUrl || incoming.musicUrl,
-    musicTitle,
-  }
 }

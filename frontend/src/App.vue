@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { VideoInfo } from './types/video'
 import { formatDuration } from './utils/duration'
 import { useVideoPage } from './composables/useVideoPage'
@@ -50,6 +51,7 @@ const {
   stopBatchDownload,
   musicDownload,
 } = useVideoPage()
+const firstImageIndex = computed(() => video.value?.images?.findIndex((asset) => !!asset.url) ?? -1)
 function platformName(platform: VideoInfo['platform']) {
   const names: Record<VideoInfo['platform'], string> = {
     douyin: '抖音',
@@ -125,52 +127,6 @@ function platformName(platform: VideoInfo['platform']) {
       class="result-card"
       :class="{ 'image-result-card': video.mediaType === 'image' }"
     >
-      <div v-if="video.mediaType === 'video'" class="cover-wrap">
-        <img v-if="video.cover" :src="video.cover" :alt="video.title" class="cover" />
-        <div v-else class="cover-placeholder">暂无封面</div>
-        <span v-if="formatDuration(video.duration)" class="duration-badge">{{
-          formatDuration(video.duration)
-        }}</span>
-      </div>
-
-      <div v-else class="image-gallery">
-        <article
-          v-for="(asset, index) in video.images ?? []"
-          :key="asset.url + (asset.livePhotoUrl ?? '')"
-          class="image-card"
-        >
-          <div class="image-preview">
-            <img v-if="asset.url" :src="asset.url" :alt="video.title + ' - ' + (index + 1)" />
-            <div v-else class="cover-placeholder">实况视频</div>
-            <span v-if="asset.livePhotoUrl" class="live-photo-badge">Live Photo</span>
-          </div>
-          <div class="image-card-actions">
-            <button
-              v-if="asset.livePhotoUrl"
-              type="button"
-              class="image-download-button primary-image-action"
-              :disabled="
-                loading || bufferBusy || batchDownloading || !!batchPart || batchCanContinue
-              "
-              @click="handleDownloadLivePhoto(index)"
-            >
-              下载动态视频
-            </button>
-            <button
-              v-if="asset.url"
-              type="button"
-              class="image-download-button"
-              :disabled="
-                loading || bufferBusy || batchDownloading || !!batchPart || batchCanContinue
-              "
-              @click="handleDownloadImage(index)"
-            >
-              {{ asset.watermarkFree ? '下载无水印原图' : '下载高清原图' }}
-            </button>
-          </div>
-        </article>
-      </div>
-
       <div class="video-info">
         <p v-if="previewing" class="download-tip" role="status">
           已获取作品，正在检查其余资源与画质；完成后即可下载。
@@ -413,6 +369,67 @@ function platformName(platform: VideoInfo['platform']) {
           实况作品会优先提供 MP4 动态轨；只有明确命中无水印字段时才标记“无水印原图”，避免把普通 CDN
           图片误标为无水印。
         </p>
+      </div>
+
+      <div v-if="video.mediaType === 'video'" class="cover-wrap">
+        <img
+          v-if="video.cover"
+          :src="video.cover"
+          :alt="video.title"
+          class="cover"
+          loading="eager"
+          fetchpriority="high"
+          decoding="async"
+        />
+        <div v-else class="cover-placeholder">暂无封面</div>
+        <span v-if="formatDuration(video.duration)" class="duration-badge">{{
+          formatDuration(video.duration)
+        }}</span>
+      </div>
+
+      <div v-else class="image-gallery">
+        <article
+          v-for="(asset, index) in video.images ?? []"
+          :key="asset.url + (asset.livePhotoUrl ?? '')"
+          class="image-card"
+        >
+          <div class="image-preview">
+            <img
+              v-if="asset.url"
+              :src="asset.url"
+              :alt="video.title + ' - ' + (index + 1)"
+              :loading="index === firstImageIndex ? 'eager' : 'lazy'"
+              :fetchpriority="index === firstImageIndex ? 'high' : 'auto'"
+              decoding="async"
+            />
+            <div v-else class="cover-placeholder">实况视频</div>
+            <span v-if="asset.livePhotoUrl" class="live-photo-badge">Live Photo</span>
+          </div>
+          <div class="image-card-actions">
+            <button
+              v-if="asset.livePhotoUrl"
+              type="button"
+              class="image-download-button primary-image-action"
+              :disabled="
+                loading || bufferBusy || batchDownloading || !!batchPart || batchCanContinue
+              "
+              @click="handleDownloadLivePhoto(index)"
+            >
+              下载动态视频
+            </button>
+            <button
+              v-if="asset.url"
+              type="button"
+              class="image-download-button"
+              :disabled="
+                loading || bufferBusy || batchDownloading || !!batchPart || batchCanContinue
+              "
+              @click="handleDownloadImage(index)"
+            >
+              {{ asset.watermarkFree ? '下载无水印原图' : '下载高清原图' }}
+            </button>
+          </div>
+        </article>
       </div>
     </section>
 

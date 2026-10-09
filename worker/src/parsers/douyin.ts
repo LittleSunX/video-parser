@@ -9,7 +9,8 @@ import { findMediaItem, findFilterReason } from './douyin/items'
 import { extractRouterData, pageMatchesExpectedVideo, extractMeta } from './douyin/page'
 import { runParseStrategies } from './douyin/strategies'
 import { normalizeText, normalizeUrl } from './douyin/text'
-import type { AttemptScheduler } from './douyin/attempt-scheduler'
+import { createAttemptScheduler, type AttemptScheduler } from './douyin/attempt-scheduler'
+import { runOrderedCandidates } from './douyin/ordered-candidates'
 
 export class DouyinParser implements VideoParser {
   supports(url: string): boolean {
@@ -47,8 +48,11 @@ export class DouyinParser implements VideoParser {
       },
       {
         name: 'mobile-feed',
-        run: (strategySignal: AbortSignal, attempts: AttemptScheduler) =>
-          this.parseFromMobileFeed(videoId, sourceUrl, strategySignal, trace, attempts),
+        run: (
+          strategySignal: AbortSignal,
+          attempts: AttemptScheduler,
+          retain: (result: ParsedMediaResult | undefined) => void,
+        ) => this.parseFromMobileFeed(videoId, sourceUrl, strategySignal, trace, attempts, retain),
       },
       {
         name: 'mobile-ssr',
@@ -247,6 +251,7 @@ export class DouyinParser implements VideoParser {
     signal?: AbortSignal,
     trace?: Diagnostics,
     attempts?: AttemptScheduler,
+    retain?: (result: ParsedMediaResult | undefined) => void,
   ): Promise<ParsedMediaResult> {
     const endpoints = [
       'https://api5-normal-c-hl.amemv.com/aweme/v1/feed/?aweme_id=' +
@@ -269,56 +274,60 @@ export class DouyinParser implements VideoParser {
       'feed-snssdk-1128',
     ] as const
 
-    for (const [index, endpoint] of endpoints.entries()) {
-      signal?.throwIfAborted()
-      const release = await attempts?.acquire(index + 1)
-      const diagnostic = createUpstreamAttempt(
-        trace,
-        'mobile-feed',
-        endpointLabels[index],
-        index + 1,
-        signal,
-      )
-      try {
-        signal?.throwIfAborted()
-        const response = await diagnostic.response(() =>
-          fetch(endpoint, {
-            headers: {
-              'User-Agent': MOBILE_USER_AGENT,
-              Accept: 'application/json, text/plain, */*',
-            },
-            redirect: 'follow',
-            signal: signal
-              ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
-              : AbortSignal.timeout(8000),
-          }),
+    const candidateSignal = signal ?? new AbortController().signal
+    const scheduler = attempts ?? createAttemptScheduler(candidateSignal, () => {})
+    const result = await runOrderedCandidates(
+      endpoints.length,
+      candidateSignal,
+      scheduler,
+      async (index, attemptSignal) => {
+        const diagnostic = createUpstreamAttempt(
+          trace,
+          'mobile-feed',
+          endpointLabels[index],
+          index + 1,
+          attemptSignal,
         )
+        try {
+          attemptSignal.throwIfAborted()
+          const response = await diagnostic.response(() =>
+            fetch(endpoints[index], {
+              headers: {
+                'User-Agent': MOBILE_USER_AGENT,
+                Accept: 'application/json, text/plain, */*',
+              },
+              redirect: 'follow',
+              signal: AbortSignal.any([attemptSignal, AbortSignal.timeout(8000)]),
+            }),
+          )
 
-        if (!response.ok) {
-          diagnostic.result('http_error')
-          continue
+          if (!response.ok) {
+            diagnostic.result('http_error')
+            return
+          }
+
+          const data = await diagnostic.read(() => response.json() as Promise<unknown>)
+          const result = diagnostic.extract(() => {
+            const item = findMediaItem(data, videoId)
+            return item ? mapItemToVideoInfo(item, sourceUrl, videoId) : undefined
+          })
+
+          if (result) {
+            diagnostic.result('success')
+            return result
+          }
+          diagnostic.result('item_missing')
+        } catch (error) {
+          diagnostic.fail(error)
+          attemptSignal.throwIfAborted()
+          // 尝试备用移动端节点。
+        } finally {
+          diagnostic.finish()
         }
-
-        const data = await diagnostic.read(() => response.json() as Promise<unknown>)
-        const result = diagnostic.extract(() => {
-          const item = findMediaItem(data, videoId)
-          return item ? mapItemToVideoInfo(item, sourceUrl, videoId) : undefined
-        })
-
-        if (result) {
-          diagnostic.result('success')
-          return result
-        }
-        diagnostic.result('item_missing')
-      } catch (error) {
-        diagnostic.fail(error)
-        signal?.throwIfAborted()
-        // 尝试备用移动端节点。
-      } finally {
-        diagnostic.finish()
-        release?.()
-      }
-    }
+      },
+      retain,
+    )
+    if (result) return result
 
     throw new AppError('PARSE_FAILED', '移动端视频详情接口未返回有效数据', 422)
   }
