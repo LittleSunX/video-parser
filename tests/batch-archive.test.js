@@ -8,6 +8,7 @@ import {
 } from '../frontend/src/utils/batch-download'
 import { createMediaArchive } from '../frontend/src/utils/media-archive'
 import { saveBlob } from '../frontend/src/utils/auto-download'
+import { buildDownloadUrl } from '../frontend/src/utils/download'
 
 vi.mock('../frontend/src/utils/auto-download', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -170,3 +171,201 @@ test('batch media transfer can progress beyond two minutes without a total deadl
   expect(saveBlob).toHaveBeenCalledOnce()
   expect(vi.getTimerCount()).toBe(0)
 })
+
+test('proxy fallback permits slow headers and chunks without adding requests', async () => {
+  vi.useFakeTimers()
+  let proxySignal
+  const requests = []
+  global.fetch = (url, options) => {
+    requests.push({ url, method: options.method ?? 'GET' })
+    if (url === jobs[0].url) return Promise.reject(new TypeError('CORS'))
+    proxySignal = options.signal
+    return new Promise((resolve, reject) => {
+      proxySignal.addEventListener('abort', () => reject(proxySignal.reason), { once: true })
+      setTimeout(() => {
+        if (proxySignal.aborted) return
+        resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                proxySignal.addEventListener('abort', () => controller.error(proxySignal.reason), {
+                  once: true,
+                })
+                controller.enqueue(new Uint8Array([1]))
+                setTimeout(() => {
+                  if (proxySignal.aborted) return
+                  controller.enqueue(new Uint8Array([2]))
+                  controller.close()
+                }, 20000)
+              },
+            }),
+            { headers: { 'Content-Type': 'video/mp4' } },
+          ),
+        )
+      }, 10000)
+    })
+  }
+  const one = [jobs[0]]
+  const result = downloadMediaArchive(
+    one,
+    'slow-proxy.zip',
+    new AbortController().signal,
+    () => {},
+    createBatchSession(one),
+  ).then(
+    () => ({ success: true }),
+    (error) => ({ error }),
+  )
+  await vi.advanceTimersByTimeAsync(30000)
+  expect(await result).toEqual({ success: true })
+  expect(requests).toEqual([
+    { url: jobs[0].url, method: 'GET' },
+    { url: buildDownloadUrl(jobs[0].url, jobs[0].filename), method: 'GET' },
+  ])
+  expect(saveBlob).toHaveBeenCalledOnce()
+  expect([...Object.values(await entries(vi.mocked(saveBlob).mock.calls[0][0]))[0]]).toEqual([1, 2])
+  expect(vi.getTimerCount()).toBe(0)
+})
+
+test.each([
+  ['response', 8000],
+  ['read', 15000],
+])('direct batch %s timeout remains %i ms before proxy fallback', async (phase, timeout) => {
+  vi.useFakeTimers()
+  const requests = []
+  let directSignal
+  global.fetch = (url, options) => {
+    requests.push(url)
+    if (url !== jobs[0].url)
+      return Promise.resolve(
+        new Response('proxy-media', { headers: { 'Content-Type': 'video/mp4' } }),
+      )
+    directSignal = options.signal
+    if (phase === 'response')
+      return new Promise((_resolve, reject) => {
+        directSignal.addEventListener('abort', () => reject(directSignal.reason), { once: true })
+      })
+    return Promise.resolve(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            directSignal.addEventListener('abort', () => controller.error(directSignal.reason), {
+              once: true,
+            })
+          },
+        }),
+        { headers: { 'Content-Type': 'video/mp4' } },
+      ),
+    )
+  }
+  const one = [jobs[0]]
+  const running = downloadMediaArchive(one, 'direct.zip', new AbortController().signal, () => {})
+  await vi.advanceTimersByTimeAsync(timeout - 1)
+  expect(directSignal.aborted).toBe(false)
+  expect(requests).toEqual([jobs[0].url])
+  expect(saveBlob).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(1)
+  await running
+  expect(directSignal.aborted).toBe(true)
+  expect(requests).toEqual([jobs[0].url, buildDownloadUrl(jobs[0].url, jobs[0].filename)])
+  expect(saveBlob).toHaveBeenCalledOnce()
+  expect(vi.getTimerCount()).toBe(0)
+})
+
+test.each(['response', 'read'])(
+  'cancelling proxy %s aborts without saving or retrying',
+  async (phase) => {
+    vi.useFakeTimers()
+    let proxySignal
+    const requests = []
+    global.fetch = (url, options) => {
+      requests.push(url)
+      if (url === jobs[0].url) return Promise.reject(new TypeError('CORS'))
+      proxySignal = options.signal
+      if (phase === 'response')
+        return new Promise((_resolve, reject) => {
+          proxySignal.addEventListener('abort', () => reject(proxySignal.reason), { once: true })
+        })
+      return Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              proxySignal.addEventListener('abort', () => controller.error(proxySignal.reason), {
+                once: true,
+              })
+            },
+          }),
+          { headers: { 'Content-Type': 'video/mp4' } },
+        ),
+      )
+    }
+    const controller = new AbortController()
+    const one = [jobs[0]]
+    const session = createBatchSession(one)
+    const running = downloadMediaArchive(one, 'cancel.zip', controller.signal, () => {}, session)
+    const cancelled = expect(running).rejects.toHaveProperty('name', 'AbortError')
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    await cancelled
+    expect(proxySignal.aborted).toBe(true)
+    expect(requests).toEqual([jobs[0].url, buildDownloadUrl(jobs[0].url, jobs[0].filename)])
+    expect(session.files.size).toBe(0)
+    expect(session.nextIndex).toBe(0)
+    expect(saveBlob).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  },
+)
+
+test('proxy timeout keeps completed files and retries only unfinished jobs', async () => {
+  let failProxy = true
+  const requests = []
+  global.fetch = async (url) => {
+    requests.push(url)
+    if (url === jobs[1].url) throw new TypeError('CORS')
+    if (url === buildDownloadUrl(jobs[1].url, jobs[1].filename) && failProxy)
+      return new Response('timeout', { status: 504 })
+    return new Response('media', { headers: { 'Content-Type': 'video/mp4' } })
+  }
+  const session = createBatchSession(jobs)
+  await expect(run(session)).rejects.toHaveProperty('code', 'TIMEOUT')
+  expect(session.files.has(jobs[0].filename)).toBe(true)
+  expect(session.nextIndex).toBe(1)
+  expect(saveBlob).not.toHaveBeenCalled()
+  requests.length = 0
+  failProxy = false
+  await run(session)
+  expect(requests).toEqual([
+    jobs[1].url,
+    buildDownloadUrl(jobs[1].url, jobs[1].filename),
+    jobs[2].url,
+  ])
+  expect(saveBlob).toHaveBeenCalledOnce()
+  expect(Object.keys(await entries(vi.mocked(saveBlob).mock.calls[0][0]))).toEqual([
+    '1.mp4',
+    '2.mp4',
+    '3.mp4',
+  ])
+})
+
+test.each([true, false])(
+  'proxy fallback keeps the part size limit (Content-Length=%s)',
+  async (knownLength) => {
+    const one = [jobs[0]]
+    const session = createBatchSession(one, 3)
+    const requests = []
+    global.fetch = async (url) => {
+      requests.push(url)
+      if (url === jobs[0].url) throw new TypeError('CORS')
+      return new Response(new Uint8Array(4), {
+        headers: { 'Content-Type': 'video/mp4', ...(knownLength ? { 'Content-Length': '4' } : {}) },
+      })
+    }
+    await expect(
+      downloadMediaArchive(one, 'oversized.zip', new AbortController().signal, () => {}, session),
+    ).rejects.toHaveProperty('code', 'TOO_LARGE')
+    expect(requests).toEqual([jobs[0].url, buildDownloadUrl(jobs[0].url, jobs[0].filename)])
+    expect(session.files.size).toBe(0)
+    expect(session.nextIndex).toBe(0)
+    expect(saveBlob).not.toHaveBeenCalled()
+  },
+)

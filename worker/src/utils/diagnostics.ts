@@ -19,7 +19,92 @@ interface DiagnosticFields {
   livePhotos?: number
   videos?: number
   imagesComplete?: boolean
+  endpoint?: UpstreamEndpoint
+  attempt?: number
+  result?: UpstreamResult
+  waitMs?: number
+  readMs?: number
+  extractMs?: number
+  sinceRequestMs?: number
+  watermarkFreeImages?: number
+  hasAuthor?: boolean
+  hasCover?: boolean
+  hasMusic?: boolean
 }
+
+export type UpstreamStrategy = 'web-detail' | 'mobile-feed' | 'mobile-ssr' | 'page-meta'
+export type UpstreamEndpoint =
+  | 'web-detail'
+  | 'feed-amemv-6383'
+  | 'feed-amemv-1128'
+  | 'feed-snssdk-6383'
+  | 'feed-snssdk-1128'
+  | 'source-page'
+  | 'share-video'
+  | 'share-video-app'
+  | 'share-video-ssr'
+  | 'share-note'
+  | 'share-slides'
+  | 'mobile-note'
+  | 'current-page'
+export type UpstreamResult =
+  | 'success'
+  | 'http_error'
+  | 'empty_response'
+  | 'invalid_json'
+  | 'item_missing'
+  | 'page_too_small'
+  | 'router_data_missing'
+  | 'page_mismatch'
+  | 'resource_missing'
+  | 'timeout'
+  | 'cancelled'
+  | 'network_error'
+  | 'read_error'
+  | 'extract_error'
+
+const DIAGNOSTIC_EVENTS = new Set([
+  'request_response',
+  'request_error',
+  'parse_result',
+  'resolve_complete',
+  'strategy_complete',
+  'parse_selection',
+  'parse_first_usable',
+  'upstream_attempt',
+])
+const UPSTREAM_STRATEGIES = new Set(['web-detail', 'mobile-feed', 'mobile-ssr', 'page-meta'])
+const UPSTREAM_ENDPOINTS = new Set([
+  'web-detail',
+  'feed-amemv-6383',
+  'feed-amemv-1128',
+  'feed-snssdk-6383',
+  'feed-snssdk-1128',
+  'source-page',
+  'share-video',
+  'share-video-app',
+  'share-video-ssr',
+  'share-note',
+  'share-slides',
+  'mobile-note',
+  'current-page',
+])
+const UPSTREAM_RESULTS = new Set([
+  'success',
+  'http_error',
+  'empty_response',
+  'invalid_json',
+  'item_missing',
+  'page_too_small',
+  'router_data_missing',
+  'page_mismatch',
+  'resource_missing',
+  'timeout',
+  'cancelled',
+  'network_error',
+  'read_error',
+  'extract_error',
+])
 
 export interface Diagnostics {
   requestId: string
@@ -40,17 +125,142 @@ export function mediaCounts(video: VideoInfo) {
     images: video.images?.filter((image) => !!image.url).length ?? 0,
     livePhotos: video.images?.filter((image) => !!image.livePhotoUrl).length ?? 0,
     videos: video.videoUrl ? 1 : 0,
+    watermarkFreeImages:
+      video.images?.filter((image) => !!image.url && image.watermarkFree).length ?? 0,
+    hasAuthor: !!video.author,
+    hasCover: !!video.cover,
+    hasMusic: !!video.musicUrl,
   }
 }
 
+/** One diagnostic record per existing fetch; labels and outcomes never contain upstream data. */
+export function createUpstreamAttempt(
+  trace: Diagnostics | undefined,
+  strategy: UpstreamStrategy,
+  endpoint: UpstreamEndpoint,
+  attempt: number,
+  signal?: AbortSignal,
+) {
+  const started = Date.now()
+  const timings = { waitMs: 0, readMs: 0, extractMs: 0 }
+  let phase: 'waitMs' | 'readMs' | 'extractMs' = 'waitMs'
+  let status: number | undefined
+  let result: UpstreamResult | undefined
+  let finished = false
+  async function measure<T>(name: 'waitMs' | 'readMs', operation: () => Promise<T>): Promise<T> {
+    phase = name
+    const begin = Date.now()
+    try {
+      return await operation()
+    } finally {
+      timings[name] += Math.max(0, Date.now() - begin)
+    }
+  }
+  return {
+    async response(operation: () => Promise<Response>) {
+      const response = await measure('waitMs', operation)
+      status = response.status
+      return response
+    },
+    read<T>(operation: () => Promise<T>): Promise<T> {
+      return measure('readMs', operation)
+    },
+    extract<T>(operation: () => T): T {
+      phase = 'extractMs'
+      const begin = Date.now()
+      try {
+        return operation()
+      } finally {
+        timings.extractMs += Math.max(0, Date.now() - begin)
+      }
+    },
+    result(value: UpstreamResult) {
+      result = value
+    },
+    fail(error: unknown) {
+      const reason = signal?.aborted ? signal.reason : error
+      if (reason instanceof Error && reason.name === 'TimeoutError') result = 'timeout'
+      else if (signal?.aborted || (reason instanceof Error && reason.name === 'AbortError'))
+        result = 'cancelled'
+      else if (!result) {
+        if (reason instanceof SyntaxError) result = 'invalid_json'
+        else if (reason instanceof AppError && reason.code === 'VIDEO_RESOURCE_NOT_FOUND')
+          result = 'resource_missing'
+        else
+          result =
+            phase === 'waitMs'
+              ? 'network_error'
+              : phase === 'readMs'
+                ? 'read_error'
+                : 'extract_error'
+      }
+    },
+    finish() {
+      if (finished) return
+      finished = true
+      trace?.emit('upstream_attempt', {
+        strategy,
+        endpoint,
+        attempt,
+        ...(status === undefined ? {} : { status }),
+        result: result ?? 'extract_error',
+        ...timings,
+        durationMs: Math.max(0, Date.now() - started),
+      })
+    },
+  }
+}
+
+function safeFields(fields: DiagnosticFields): DiagnosticFields {
+  const safe: DiagnosticFields = {}
+  for (const name of [
+    'durationMs',
+    'waitMs',
+    'readMs',
+    'extractMs',
+    'sinceRequestMs',
+    'attempt',
+    'status',
+    'images',
+    'livePhotos',
+    'videos',
+    'watermarkFreeImages',
+  ] as const) {
+    const value = fields[name]
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) safe[name] = value
+  }
+  for (const name of ['imagesComplete', 'hasAuthor', 'hasCover', 'hasMusic'] as const)
+    if (typeof fields[name] === 'boolean') safe[name] = fields[name]
+  if (fields.operation && ['parse', 'download', 'other'].includes(fields.operation))
+    safe.operation = fields.operation
+  if (fields.strategy && UPSTREAM_STRATEGIES.has(fields.strategy)) safe.strategy = fields.strategy
+  if (fields.endpoint && UPSTREAM_ENDPOINTS.has(fields.endpoint)) safe.endpoint = fields.endpoint
+  if (fields.result && UPSTREAM_RESULTS.has(fields.result)) safe.result = fields.result
+  if (fields.outcome && ['success', 'error', 'cancelled'].includes(fields.outcome))
+    safe.outcome = fields.outcome
+  if (fields.reason && ['complete', 'exhausted', 'timeout', 'cancelled'].includes(fields.reason))
+    safe.reason = fields.reason
+  if (typeof fields.code === 'string' && /^[A-Z_]{1,64}$/.test(fields.code)) safe.code = fields.code
+  return safe
+}
+
 export function createDiagnostics(metadata?: VersionMetadata): Diagnostics {
+  const started = Date.now()
   const requestId = crypto.randomUUID()
-  const version = metadata?.id && /^[a-zA-Z0-9-]{1,64}$/.test(metadata.id) ? metadata.id : 'unknown'
+  const version =
+    typeof metadata?.id === 'string' && /^[a-zA-Z0-9-]{1,64}$/.test(metadata.id)
+      ? metadata.id
+      : 'unknown'
   const timings = new Map<string, number>()
   return {
     requestId,
     version,
     emit(event, fields = {}) {
+      event = DIAGNOSTIC_EVENTS.has(event) ? event : 'unknown_event'
+      fields = safeFields(fields)
+      // Selection durations start at the strategy runner; this includes input/resolve time too.
+      if (event === 'parse_first_usable' || event === 'parse_selection')
+        fields.sinceRequestMs = Math.max(0, Date.now() - started)
       const metric =
         event === 'request_response'
           ? 'worker'
