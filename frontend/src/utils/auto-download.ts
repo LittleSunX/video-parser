@@ -45,14 +45,26 @@ export async function fetchMediaBlob(
         )
       : undefined
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+  let response: Response | undefined
   try {
     resetIdleTimer(responseTimeoutMs)
-    const response = await fetch(url, {
-      mode: 'cors',
-      credentials: 'omit',
-      referrerPolicy: 'no-referrer',
-      signal: controller.signal,
-    })
+    response = await waitForAbort<Response>(
+      fetch(url, {
+        mode: 'cors',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
+        signal: controller.signal,
+      }).then((result) => {
+        // 某些浏览器的连接结束晚于中止事件，迟到的响应不能继续占用媒体流。
+        if (controller.signal.aborted) {
+          cancelBody(result.body)
+          controller.signal.throwIfAborted()
+        }
+        return result
+      }),
+      controller.signal,
+    )
+    controller.signal.throwIfAborted()
     if (!response.ok) throw responseDownloadError(response.status)
     if (!response.body) throw new MediaDownloadError('INVALID_MEDIA', '媒体内容为空')
     const contentType = response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase()
@@ -72,7 +84,7 @@ export async function fetchMediaBlob(
     let received = 0
     while (true) {
       resetIdleTimer(readTimeoutMs)
-      const { value, done } = await reader.read()
+      const { value, done } = await waitForAbort(reader.read(), controller.signal)
       controller.signal.throwIfAborted()
       if (done) break
       received += value.byteLength
@@ -94,15 +106,58 @@ export async function fetchMediaBlob(
     clearTimeout(totalTimer)
     signal.removeEventListener('abort', cancel)
     controller.abort()
-    if (reader) {
-      try {
-        await reader.cancel()
-      } catch {
-        /* 请求已中止。 */
-      }
+    if (reader) releaseReader(reader)
+    else cancelBody(response?.body)
+  }
+}
+
+/** 不依赖底层 fetch/read 响应中止，避免连接或流清理挂起时越过下载期限。 */
+function waitForAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener('abort', abort)
+    const abort = () => {
+      cleanup()
+      reject(signal.reason)
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    // 始终接收迟到的成功或失败，避免中止后的 Promise 拒绝无人处理。
+    pending.then(
+      (value) => {
+        cleanup()
+        resolve(value)
+      },
+      (error) => {
+        cleanup()
+        reject(error)
+      },
+    )
+    if (signal.aborted) abort()
+  })
+}
+
+function cancelBody(body: ReadableStream<Uint8Array> | null | undefined) {
+  try {
+    void body?.cancel().catch(() => {})
+  } catch {
+    /* 媒体流已释放。 */
+  }
+}
+
+function releaseReader(reader: ReadableStreamDefaultReader<Uint8Array>) {
+  const release = () => {
+    try {
       reader.releaseLock()
+    } catch {
+      /* 底层读取尚未响应中止，取消完成后再次释放。 */
     }
   }
+  try {
+    // cancel 会结束待处理的读取；其底层清理可能不结束，不能阻塞失败或代理回退。
+    void reader.cancel().then(release, release)
+  } catch {
+    /* 媒体流已中止。 */
+  }
+  release()
 }
 
 export async function downloadDirectVideo(

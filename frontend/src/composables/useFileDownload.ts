@@ -20,7 +20,7 @@ interface FileDownloadOptions {
 
 type DownloadState = 'receiving' | 'handed-off' | 'fallback' | 'cancelled' | 'failed'
 
-/** 音乐与封面使用原有代理单次流式请求，读取数据时同步更新进度。 */
+/** 音乐优先直连，失败时回退一次代理；封面沿用代理，流式读取时更新进度。 */
 export function useFileDownload({
   label,
   kind,
@@ -96,26 +96,51 @@ export function useFileDownload({
     download.downloading = true
     download.status = '正在连接' + label + '下载…'
     try {
-      const blob = await fetchMediaBlob(
-        buildDownloadUrl(target.url, target.filename),
-        {
-          signal: controller.signal,
-          // 沿用代理端的响应与停滞超时，客户端不比原生下载更早中断慢连接。
-          totalTimeoutMs: 0,
-          responseTimeoutMs: 0,
-          readTimeoutMs: 0,
-          onProgress(received, total) {
-            if (activeController !== controller) return
-            download.progress = total
-              ? Math.min(100, Math.round((received / total) * 100))
-              : undefined
-            download.status = total
-              ? '正在下载 ' + download.progress + '%'
-              : '已接收 ' + (received / 1024 / 1024).toFixed(1) + ' MB'
-          },
+      const options = {
+        signal: controller.signal,
+        // 持续收到数据时不限制总时长，另行保护浏览器到下载服务的连接和停滞。
+        totalTimeoutMs: 0,
+        onProgress(received: number, total?: number) {
+          if (activeController !== controller) return
+          download.progress = total
+            ? Math.min(100, Math.round((received / total) * 100))
+            : undefined
+          download.status = total
+            ? '正在下载 ' + download.progress + '%'
+            : '已接收 ' + (received / 1024 / 1024).toFixed(1) + ' MB'
         },
-        kind,
-      )
+      }
+      const fetchFromProxy = () =>
+        fetchMediaBlob(
+          buildDownloadUrl(target.url, target.filename),
+          {
+            ...options,
+            // 给 Worker 的 15 秒响应、30 秒上游停滞保护留出网络传输余量。
+            responseTimeoutMs: 30000,
+            readTimeoutMs: 45000,
+          },
+          kind,
+        )
+      let blob: Blob
+      if (kind === 'audio') {
+        try {
+          blob = await fetchMediaBlob(
+            target.url,
+            { ...options, responseTimeoutMs: 8000, readTimeoutMs: 15000 },
+            kind,
+          )
+        } catch (error) {
+          controller.signal.throwIfAborted()
+          if (
+            !(error instanceof MediaDownloadError) ||
+            !['NETWORK', 'TIMEOUT', 'EXPIRED', 'INVALID_MEDIA'].includes(error.code)
+          )
+            throw error
+          download.progress = undefined
+          download.status = '正在重新连接' + label + '下载…'
+          blob = await fetchFromProxy()
+        }
+      } else blob = await fetchFromProxy()
       if (activeController !== controller) return
       prepared.prepare(
         blob,
