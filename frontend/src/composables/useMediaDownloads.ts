@@ -176,12 +176,20 @@ export function useMediaDownloads(
 
   async function handleDownloadVideo() {
     const current = video.value
-    if (!current?.videoUrl || videoDownloading.value) return
+    if (!current?.videoUrl) return
+    return downloadSingleVideo(current.videoUrl, buildVideoFilename(current), '视频')
+  }
+
+  /** 普通视频与单个实况共用直连、进度、缓冲保存及代理回退。 */
+  async function downloadSingleVideo(url: string, filename: string, label: string) {
+    if (videoDownloading.value) return
     const release = bufferBudget.acquire(videoOwner, PAGE_BUFFER_BUDGET_BYTES)
     if (!release) {
       showNotice('请先完成或取消当前下载任务')
       return
     }
+    // 旧代理错误不影响新直连；已有浏览器下载仍留给浏览器继续接收。
+    nativeRequestNumber++
     videoPrepared.clear()
     bufferBudget.retain(videoOwner, 0)
     releaseVideoBuffer = release
@@ -192,7 +200,7 @@ export function useMediaDownloads(
     downloadNeedsReparse.value = false
     downloadStatus.value = '正在连接下载…'
     try {
-      const blob = await fetchMediaBlob(current.videoUrl, {
+      const blob = await fetchMediaBlob(url, {
         signal: controller.signal,
         onProgress(received, total) {
           if (downloadController !== controller) return
@@ -202,12 +210,12 @@ export function useMediaDownloads(
         },
       })
       if (downloadController !== controller) return
-      videoPrepared.prepare(blob, buildVideoFilename(current))
+      videoPrepared.prepare(blob, filename)
       bufferBudget.retain(videoOwner, blob.size)
       videoPrepared.save()
       downloadState.value = 'handed-off'
       downloadStatus.value = '已请求浏览器保存，请查看下载列表；未保存时可在 30 秒内再次保存。'
-      showNotice('视频已交给浏览器保存，请查看下载列表', 6000)
+      showNotice(label + '已交给浏览器保存，请查看下载列表', 6000)
     } catch {
       if (controller.signal.aborted || downloadController !== controller) return
       if (videoPrepared.canSave.value) {
@@ -217,7 +225,7 @@ export function useMediaDownloads(
       } else {
         release()
         releaseVideoBuffer = undefined
-        startNativeDownload(current.videoUrl, buildVideoFilename(current), '已切换到备用下载')
+        startNativeDownload(url, filename, '已切换到备用下载')
       }
     } finally {
       release()
@@ -230,7 +238,7 @@ export function useMediaDownloads(
   }
 
   function saveVideoAgain() {
-    if (!video.value?.videoUrl || bufferBudget.busy.value) return
+    if (!video.value || bufferBudget.busy.value) return
     try {
       if (!videoPrepared.save()) return
       downloadState.value = 'handed-off'
@@ -278,14 +286,14 @@ export function useMediaDownloads(
     )
   }
 
-  function handleDownloadLivePhoto(index: number) {
+  async function handleDownloadLivePhoto(index: number) {
     const current = video.value
     const asset = current?.images?.[index]
     if (!current || !asset?.livePhotoUrl) return
-    startNativeDownload(
+    return downloadSingleVideo(
       asset.livePhotoUrl,
       buildLivePhotoFilename(current, index),
-      '已发起第 ' + (index + 1) + ' 个实况视频下载',
+      '第 ' + (index + 1) + ' 个实况视频',
     )
   }
 
@@ -326,7 +334,7 @@ export function useMediaDownloads(
     if (!targets.length) return
     if (targets.length === 1) {
       const target = targets[0]!
-      if (target.live) handleDownloadLivePhoto(target.index)
+      if (target.live) return handleDownloadLivePhoto(target.index)
       else handleDownloadImage(target.index)
       return
     }
