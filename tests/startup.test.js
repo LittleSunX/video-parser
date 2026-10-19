@@ -61,6 +61,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
@@ -170,10 +171,64 @@ test.each(['mount throws', 'component error is handled by Vue'])(
       app.config.errorHandler(error, null, 'setup')
     })
     vi.mocked(createApp).mockReturnValue(app)
-    expect(() => mountApplication()).toThrow()
+    let caught
+    try {
+      mountApplication()
+    } catch (failure) {
+      caught = failure
+    }
+    expect(caught).toBe(error)
     expect(app.unmount).toHaveBeenCalledOnce()
     expect(page.app.replaceChildren).toHaveBeenCalledOnce()
     expect(app.config.errorHandler).toBe(previousHandler)
     expect(previousHandler).toHaveBeenCalledTimes(failure === 'mount throws' ? 0 : 1)
   },
 )
+
+test('the first component failure survives later component and unmount failures', () => {
+  const page = browser()
+  vi.stubGlobal('document', page.document)
+  const first = new Error('original setup failure')
+  const app = {
+    config: {},
+    mount: vi.fn(() => {
+      app.config.errorHandler(first, null, 'setup')
+      app.config.errorHandler(new Error('secondary render failure'), null, 'render')
+    }),
+    unmount: vi.fn(() => {
+      throw new Error('cleanup failed')
+    }),
+  }
+  vi.mocked(createApp).mockReturnValue(app)
+  let caught
+  try {
+    mountApplication()
+  } catch (error) {
+    caught = error
+  }
+  expect(caught).toBe(first)
+  expect(page.app.replaceChildren).toHaveBeenCalledOnce()
+  expect(app.config.errorHandler).toBeUndefined()
+})
+
+test('the entry logs the original startup error while keeping the generic failure feedback', async () => {
+  const page = startFeedback()
+  vi.stubGlobal('document', page.document)
+  page.window.dispatchEvent = vi.fn((event) => page.window.emit(event.type, event))
+  vi.stubGlobal('window', page.window)
+  const original = new Error('component setup details')
+  const app = {
+    config: {},
+    mount: vi.fn(() => app.config.errorHandler(original, null, 'setup')),
+    unmount: vi.fn(),
+  }
+  vi.mocked(createApp).mockReturnValue(app)
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  await import('../frontend/src/main')
+  await vi.dynamicImportSettled()
+  expect(log).toHaveBeenCalledExactlyOnceWith('应用启动失败', original)
+  expect(page.attributes.get('role')).toBe('alert')
+  expect(page.message.textContent).toContain('失败')
+  expect(page.message.textContent).not.toContain(original.message)
+  expect(page.window.dispatchEvent).toHaveBeenCalledOnce()
+})

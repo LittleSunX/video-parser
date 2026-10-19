@@ -1,6 +1,7 @@
 import { createDiagnostics, errorCode, mediaCounts, withDiagnostics } from './utils/diagnostics'
 import type { Diagnostics } from './utils/diagnostics'
 import { imageFilename } from '../../shared/media'
+import { truncateFilename } from '../../shared/filename'
 import { fetchMedia } from './services/media-download'
 import { AppError } from './errors/app-error'
 import { parseVideo } from './services/parse-service'
@@ -145,12 +146,14 @@ async function handleDownload(
 }
 
 function sanitizeFilename(value: string): string {
-  const cleaned = value
-    .replace(/[\u0000-\u001F\u007F]/g, '')
-    .replace(/[\\/:*?"<>|]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 180)
+  const cleaned = truncateFilename(
+    value
+      .replace(/[\u0000-\u001F\u007F]/g, '')
+      .replace(/[\\/:*?"<>|]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim(),
+    180,
+  )
 
   return cleaned || 'download'
 }

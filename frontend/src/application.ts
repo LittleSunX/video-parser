@@ -7,13 +7,15 @@ export function mountApplication() {
   const app = createApp(App)
   const originalHandler = app.config.errorHandler
   let failed = false
+  let startupError: unknown
   app.config.errorHandler = (...args) => {
+    if (!failed) startupError = args[0]
     failed = true
     originalHandler?.(...args)
   }
   try {
     app.mount('#app')
-    if (failed) throw new Error('应用启动失败')
+    if (failed) throw startupError
   } catch (error) {
     try {
       app.unmount()
