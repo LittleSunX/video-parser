@@ -1,9 +1,11 @@
 import type { VideoInfo } from '../types/video'
 import { readVideoPayload } from './response'
+import { ParseError } from './parse-error'
 
 const MAX_FRAME_LENGTH = 2 * 1024 * 1024
 const MAX_STREAM_BYTES = 16 * 1024 * 1024
-const protocolError = () => new Error('解析结果传输中断或格式异常，请重新解析')
+const protocolError = () =>
+  new ParseError('INVALID_RESPONSE', '解析结果传输中断或格式异常，请重新解析')
 
 /** 一个解析请求内先显示候选内容，必须收到最终结果才算成功。 */
 export async function readParseStream(

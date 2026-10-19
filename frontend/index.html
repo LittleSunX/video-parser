@@ -8,7 +8,78 @@
     <title>Video Parser</title>
   </head>
   <body>
+    <section
+      id="app-startup"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      style="
+        max-width: 32rem;
+        margin: 4rem auto;
+        padding: 1.5rem;
+        color: #172033;
+        font:
+          1rem / 1.6 system-ui,
+          sans-serif;
+      "
+    >
+      <p id="startup-message">正在加载网站，请稍候…</p>
+      <noscript><p>当前浏览器未启用 JavaScript，请开启后刷新页面。</p></noscript>
+      <a href="./" style="color: #4d57c7">刷新页面</a>
+    </section>
     <div id="app"></div>
+    <script data-startup-feedback>
+      ;(() => {
+        const panel = document.getElementById('app-startup')
+        const message = document.getElementById('startup-message')
+        if (!panel || !message) return
+        let settled = false
+
+        const timer = window.setTimeout(() => {
+          message.textContent = '页面资源仍在加载，请稍候。若长时间没有显示，可手动刷新。'
+        }, 8000)
+
+        function cleanup(keepReadyListener = false) {
+          window.clearTimeout(timer)
+          window.removeEventListener('error', onError, true)
+          if (!keepReadyListener) window.removeEventListener('video-parser:startup', onStartup)
+        }
+
+        function fail() {
+          if (settled) return
+          settled = true
+          // 应用随后若实际挂载成功，ready 仍应移除错误反馈。
+          cleanup(true)
+          panel.setAttribute('role', 'alert')
+          panel.setAttribute('aria-live', 'assertive')
+          panel.setAttribute('aria-busy', 'false')
+          message.textContent = '页面资源加载失败，或应用未能启动。请刷新页面重试。'
+        }
+
+        function onError(event) {
+          const target = event.target
+          if (
+            target === window ||
+            (target?.tagName === 'SCRIPT' && target.type === 'module') ||
+            (target?.tagName === 'LINK' && target.rel === 'stylesheet')
+          ) {
+            fail()
+          }
+        }
+
+        function onStartup(event) {
+          if (event.detail === 'failed') fail()
+          else if (event.detail === 'ready') {
+            settled = true
+            cleanup()
+            panel.remove()
+          }
+        }
+
+        window.addEventListener('error', onError, true)
+        window.addEventListener('video-parser:startup', onStartup)
+      })()
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

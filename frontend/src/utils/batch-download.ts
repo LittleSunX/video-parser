@@ -147,9 +147,9 @@ export async function downloadMediaArchive(
             buildDownloadUrl(job.url, job.filename),
             {
               ...options,
-              // 代理沿用 Worker 的响应与停滞超时，避免客户端先于代理中断慢连接。
-              responseTimeoutMs: 0,
-              readTimeoutMs: 0,
+              // 给 Worker 的上游超时留出传输余量，同时保护浏览器到代理的停滞。
+              responseTimeoutMs: 30000,
+              readTimeoutMs: 45000,
             },
             kind,
             session.maxPartBytes - received,

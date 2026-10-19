@@ -8,6 +8,9 @@ const {
   input,
   loading,
   errorMessage,
+  errorDiagnostics,
+  copyingProblemInfo,
+  copyProblemInfo,
   video,
   previewing,
   notice,
@@ -117,6 +120,21 @@ function platformName(platform: VideoInfo['platform']) {
     <section v-if="errorMessage" class="message-card error-card" role="alert">
       <strong>解析失败</strong>
       <span>{{ errorMessage }}</span>
+      <div class="error-actions">
+        <button class="secondary-button" type="button" :disabled="!canSubmit" @click="handleParse">
+          重试解析
+        </button>
+        <button
+          v-if="errorDiagnostics"
+          class="secondary-button"
+          type="button"
+          :disabled="loading || copyingProblemInfo"
+          @click="copyProblemInfo"
+        >
+          {{ copyingProblemInfo ? '正在复制…' : '复制问题信息' }}
+        </button>
+      </div>
+      <small v-if="errorDiagnostics">问题信息不包含分享文案与媒体地址。</small>
     </section>
 
     <section v-if="parseWarning" class="message-card warning-card" role="status">
