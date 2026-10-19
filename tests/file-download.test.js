@@ -203,20 +203,41 @@ test('cover keeps its original WebP bytes and uses the matching filename extensi
   const cover = download('image')
   await cover.start()
   expect(fetch).toHaveBeenCalledOnce()
-  expectProxyRequest(fetch.mock.calls[0], 'image')
+  expect(fetch.mock.calls[0][0]).toBe('https://media.douyinvod.com/image')
   const [blob, filename] = vi.mocked(saveBlob).mock.calls[0]
   expect(filename).toBe('image.webp')
   expect(blob.type).toBe('image/webp')
   expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([...bytes])
 })
 
+test('image CORS failure retries the proxy once and preserves its bytes and MIME extension', async () => {
+  const fetch = vi
+    .fn()
+    .mockRejectedValueOnce(new TypeError('CORS'))
+    .mockResolvedValueOnce(
+      new Response('original png bytes', { headers: { 'Content-Type': 'image/png' } }),
+    )
+  vi.stubGlobal('fetch', fetch)
+  const cover = download('image')
+  await cover.start()
+  expect(fetch).toHaveBeenCalledTimes(2)
+  expect(fetch.mock.calls[0][0]).toBe('https://media.douyinvod.com/image')
+  expectProxyRequest(fetch.mock.calls[1], 'image')
+  expect(saveBlob).toHaveBeenCalledOnce()
+  const [blob, filename] = vi.mocked(saveBlob).mock.calls[0]
+  expect(filename).toBe('image.png')
+  expect(blob.type).toBe('image/png')
+  expect(await blob.text()).toBe('original png bytes')
+  expect(cover.state).toBe('handed-off')
+})
+
 test.each([
-  [429, 'application/json', false],
-  [422, 'application/json', true],
-  [200, 'text/html', true],
+  [429, 'application/json', false, 1],
+  [422, 'application/json', true, 2],
+  [200, 'text/html', true, 2],
 ])(
-  'HTTP %s (%s) is reported without saving or automatically retrying',
-  async (status, type, reparse) => {
+  'HTTP %s (%s) is reported after at most one proxy fallback',
+  async (status, type, reparse, requests) => {
     const fetch = vi.fn(
       async () => new Response('error', { status, headers: { 'Content-Type': type } }),
     )
@@ -228,8 +249,9 @@ test.each([
     expect(cover.downloading).toBe(false)
     expect(saveBlob).not.toHaveBeenCalled()
     expect(triggerDownload).not.toHaveBeenCalled()
-    expect(fetch).toHaveBeenCalledTimes(1)
-    expectProxyRequest(fetch.mock.calls[0], 'image')
+    expect(fetch).toHaveBeenCalledTimes(requests)
+    expect(fetch.mock.calls[0][0]).toBe('https://media.douyinvod.com/image')
+    if (requests === 2) expectProxyRequest(fetch.mock.calls[1], 'image')
   },
 )
 
@@ -508,7 +530,7 @@ test.each(['audio', 'image'])('%s proxy waits up to 30 seconds for its response'
   vi.useFakeTimers()
   let proxy
   const fetch = vi.fn((_url, options) => {
-    if (kind === 'audio' && !proxy) {
+    if (!proxy) {
       proxy = true
       return Promise.reject(new TypeError('Failed to fetch'))
     }
@@ -527,7 +549,7 @@ test.each(['audio', 'image'])('%s proxy waits up to 30 seconds for its response'
   expect(proxy.signal.aborted).toBe(true)
   expect(item.state).toBe('failed')
   expect(item.status).toContain('超时')
-  expect(fetch).toHaveBeenCalledTimes(kind === 'audio' ? 2 : 1)
+  expect(fetch).toHaveBeenCalledTimes(2)
   expect(saveBlob).not.toHaveBeenCalled()
 })
 
@@ -535,6 +557,10 @@ test('cover proxy aborts a read that stops receiving data for 45 seconds', async
   vi.useFakeTimers()
   let coverStream
   const fetch = vi.fn(async (_url, options) => {
+    if (!coverStream) {
+      coverStream = true
+      throw new TypeError('CORS')
+    }
     coverStream = streamResponse(options, { type: 'image/jpeg' })
     return coverStream.response
   })
@@ -550,8 +576,8 @@ test('cover proxy aborts a read that stops receiving data for 45 seconds', async
   await running
   expect(coverStream.signal.aborted).toBe(true)
   expect(cover.state).toBe('failed')
-  expect(fetch).toHaveBeenCalledOnce()
-  expectProxyRequest(fetch.mock.calls[0], 'image')
+  expect(fetch).toHaveBeenCalledTimes(2)
+  expectProxyRequest(fetch.mock.calls[1], 'image')
   expect(saveBlob).not.toHaveBeenCalled()
 })
 

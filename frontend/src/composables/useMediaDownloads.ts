@@ -15,6 +15,7 @@ import {
   createDownloadBufferBudget,
   PAGE_BUFFER_BUDGET_BYTES,
   ZIP_PART_SOURCE_BYTES,
+  SINGLE_BUFFER_BYTES,
 } from '../utils/download-buffer'
 import { createPreparedDownload, PREPARED_DOWNLOAD_TTL_MS } from '../utils/prepared-download'
 import {
@@ -54,6 +55,20 @@ export function useMediaDownloads(
   showNotice: (message: string, duration?: number) => void,
 ) {
   const bufferBudget = createDownloadBufferBudget()
+  const selectedImageIndex = ref(0)
+  const imageDownload = useFileDownload({
+    label: '图片',
+    kind: 'image',
+    getTarget: () => {
+      const current = video.value
+      const asset = current?.images?.[selectedImageIndex.value]
+      return current && asset?.url
+        ? { url: asset.url, filename: buildImageFilename(current, selectedImageIndex.value) }
+        : undefined
+    },
+    showNotice,
+    bufferBudget,
+  })
   const coverDownload = useFileDownload({
     label: '封面',
     kind: 'image',
@@ -177,6 +192,18 @@ export function useMediaDownloads(
   async function handleDownloadVideo() {
     const current = video.value
     if (!current?.videoUrl) return
+    if (
+      typeof current.videoSize === 'number' &&
+      Number.isSafeInteger(current.videoSize) &&
+      current.videoSize > SINGLE_BUFFER_BYTES
+    ) {
+      startNativeDownload(
+        current.videoUrl,
+        buildVideoFilename(current),
+        '文件较大，已交给浏览器下载',
+      )
+      return
+    }
     return downloadSingleVideo(current.videoUrl, buildVideoFilename(current), '视频')
   }
 
@@ -279,13 +306,12 @@ export function useMediaDownloads(
     const current = video.value
     const asset = current?.images?.[index]
     if (!current || !asset?.url) return
-    startNativeDownload(
-      asset.url,
-      buildImageFilename(current, index),
-      asset.watermarkFree
-        ? '已发起第 ' + (index + 1) + ' 张无水印原图下载'
-        : '已发起第 ' + (index + 1) + ' 张高清原图下载',
-    )
+    if (bufferBudget.busy.value) {
+      showNotice('请先完成或取消当前下载任务')
+      return
+    }
+    selectedImageIndex.value = index
+    return imageDownload.start()
   }
 
   async function handleDownloadLivePhoto(index: number) {
@@ -337,8 +363,7 @@ export function useMediaDownloads(
     if (targets.length === 1) {
       const target = targets[0]!
       if (target.live) return handleDownloadLivePhoto(target.index)
-      else handleDownloadImage(target.index)
-      return
+      return handleDownloadImage(target.index)
     }
     const jobs = targets.map((target) => ({
       url: target.url,
@@ -519,6 +544,7 @@ export function useMediaDownloads(
     handleOpenVideoLink,
     handleProxyDownloadVideo,
     coverDownload,
+    imageDownload,
     handleDownloadImage,
     handleDownloadLivePhoto,
     handleDownloadAllPreferred,

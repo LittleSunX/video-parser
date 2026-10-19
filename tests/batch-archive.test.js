@@ -401,3 +401,176 @@ test.each([true, false])(
     expect(saveBlob).not.toHaveBeenCalled()
   },
 )
+
+const imageJobs = [1, 2, 3, 4].map((index) => ({
+  url: 'https://cdn/image-' + index,
+  filename: index + '.jpg',
+}))
+function controlledMedia(length = 4, type = 'image/jpeg') {
+  const pending = new Map()
+  const requests = []
+  let active = 0
+  let peak = 0
+  global.fetch = async (url, options) => {
+    requests.push(url)
+    active++
+    peak = Math.max(peak, active)
+    let finished = false
+    const done = () => {
+      if (!finished) {
+        finished = true
+        active--
+      }
+    }
+    options.signal.addEventListener('abort', done, { once: true })
+    return new Response(
+      new ReadableStream({
+        start(source) {
+          pending.set(url, {
+            signal: options.signal,
+            finish(size = length ?? 4) {
+              source.enqueue(new Uint8Array(size).fill(Number(url.slice(-1))))
+              source.close()
+              done()
+            },
+            fail() {
+              source.error(new TypeError('offline'))
+              done()
+            },
+          })
+        },
+        cancel: done,
+      }),
+      {
+        headers: { 'Content-Type': type, ...(length ? { 'Content-Length': String(length) } : {}) },
+      },
+    )
+  }
+  return { pending, requests, peak: () => peak, active: () => active }
+}
+const imageRun = (jobs, session, controller = new AbortController()) =>
+  downloadMediaArchive(jobs, 'images.zip', controller.signal, () => {}, session)
+
+test('small images overlap two at a time, preserve ZIP order, and never probe or duplicate GETs', async () => {
+  const media = controlledMedia()
+  const session = createBatchSession(imageJobs, 20)
+  const running = imageRun(imageJobs, session)
+  await vi.waitFor(() => expect(media.requests).toHaveLength(2))
+  media.pending.get(imageJobs[1].url).finish()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(media.requests).toHaveLength(2)
+  expect(saveBlob).not.toHaveBeenCalled()
+  media.pending.get(imageJobs[0].url).finish()
+  await vi.waitFor(() => expect(media.requests).toHaveLength(4))
+  media.pending.get(imageJobs[3].url).finish()
+  media.pending.get(imageJobs[2].url).finish()
+  await running
+  expect(media.peak()).toBe(2)
+  expect(media.requests).toEqual(imageJobs.map(({ url }) => url))
+  const files = await entries(vi.mocked(saveBlob).mock.calls[0][0])
+  expect(Object.keys(files)).toEqual(imageJobs.map(({ filename }) => filename))
+  expect(Object.values(files).map((bytes) => [...bytes])).toEqual(
+    [1, 2, 3, 4].map((i) => [i, i, i, i]),
+  )
+})
+
+test.each([
+  [null, 'image/jpeg', '.jpg'],
+  [11, 'image/jpeg', '.jpg'],
+  [4, 'video/mp4', '.mp4'],
+])('unknown or large images and videos stay serial (%s, %s)', async (length, type, extension) => {
+  const list = imageJobs
+    .slice(0, 2)
+    .map((job) => ({ ...job, filename: job.filename.replace('.jpg', extension) }))
+  const media = controlledMedia(length, type)
+  const running = imageRun(list, createBatchSession(list, 20))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(media.requests).toHaveLength(1)
+  media.pending.get(list[0].url).finish()
+  await vi.waitFor(() => expect(media.requests).toHaveLength(2))
+  if (length !== 11) media.pending.get(list[1].url).finish()
+  await running
+  expect(media.peak()).toBe(1)
+})
+
+test('prefetched files use only remaining part capacity and split without losing data', async () => {
+  const list = imageJobs.slice(0, 2)
+  const requests = []
+  global.fetch = async (url) => {
+    requests.push(url)
+    const size = url === list[0].url ? 4 : 8
+    return new Response(new Uint8Array(size).fill(size), {
+      headers: { 'Content-Type': 'image/jpeg', 'Content-Length': String(size) },
+    })
+  }
+  const session = createBatchSession(list, 10)
+  await imageRun(list, session)
+  expect(session.part.count).toBe(1)
+  expect(session.part.final).toBe(false)
+  const first = await entries(session.part.blob)
+  expect([...first['1.jpg']]).toEqual(new Array(4).fill(4))
+  expect(saveArchivePart(session)).toBe(false)
+  await imageRun(list, session)
+  expect(session.part.final).toBe(true)
+  const second = await entries(session.part.blob)
+  expect([...second['2.jpg']]).toEqual(new Array(8).fill(8))
+  expect(requests).toEqual([list[0].url, list[1].url, list[1].url])
+})
+
+test('cancellation stops both image transfers and cannot save or initiate a proxy retry', async () => {
+  const media = controlledMedia()
+  const controller = new AbortController()
+  const session = createBatchSession(imageJobs, 20)
+  const running = imageRun(imageJobs, session, controller)
+  const rejected = expect(running).rejects.toHaveProperty('name', 'AbortError')
+  await vi.waitFor(() => expect(media.requests).toHaveLength(2))
+  controller.abort()
+  await rejected
+  expect([...media.pending.values()].every(({ signal }) => signal.aborted)).toBe(true)
+  expect(media.active()).toBe(0)
+  expect(media.requests).toHaveLength(2)
+  expect(session.files.size).toBe(0)
+  expect(saveBlob).not.toHaveBeenCalled()
+})
+
+test('prefetch failure retains committed images and retry only fetches unfinished files', async () => {
+  const list = imageJobs.slice(0, 3)
+  let broken = true
+  const requests = []
+  global.fetch = async (url) => {
+    requests.push(url)
+    if (broken && (url === list[1].url || url === buildDownloadUrl(list[1].url, list[1].filename)))
+      throw new TypeError('offline')
+    return new Response(new Uint8Array(4), {
+      headers: { 'Content-Type': 'image/jpeg', 'Content-Length': '4' },
+    })
+  }
+  const session = createBatchSession(list, 20)
+  await expect(imageRun(list, session)).rejects.toHaveProperty('code', 'NETWORK')
+  expect(session.nextIndex).toBe(1)
+  expect([...session.files.keys()]).toEqual(['1.jpg'])
+  expect(saveBlob).not.toHaveBeenCalled()
+  requests.length = 0
+  broken = false
+  await imageRun(list, session)
+  expect(requests).toEqual([list[1].url, list[2].url])
+  expect(Object.keys(await entries(vi.mocked(saveBlob).mock.calls[0][0]))).toEqual([
+    '1.jpg',
+    '2.jpg',
+    '3.jpg',
+  ])
+})
+
+test('underreported length cannot exceed an image reservation or leave its peer running', async () => {
+  const media = controlledMedia()
+  const session = createBatchSession(imageJobs, 20)
+  const running = imageRun(imageJobs, session)
+  const rejected = expect(running).rejects.toHaveProperty('code', 'TOO_LARGE')
+  await vi.waitFor(() => expect(media.requests).toHaveLength(2))
+  media.pending.get(imageJobs[0].url).finish(6)
+  await rejected
+  expect(media.pending.get(imageJobs[1].url).signal.aborted).toBe(true)
+  expect(session.files.size).toBe(0)
+  expect(media.requests).toHaveLength(2)
+  expect(saveBlob).not.toHaveBeenCalled()
+})

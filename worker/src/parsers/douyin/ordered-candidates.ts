@@ -23,6 +23,7 @@ export function mergeKnownResults(
       : mergeImageAssets(previous, additional)
   video = { ...video, mediaType: 'image', images }
   delete video.videoUrl
+  delete video.videoSize
   let imagesComplete = current.imagesComplete
   if (!incoming.imagesComplete || images.length > previous.length) imagesComplete = false
   if (incoming.imagesComplete && additional.length >= images.length) imagesComplete = true

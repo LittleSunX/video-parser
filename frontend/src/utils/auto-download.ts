@@ -6,6 +6,8 @@ interface DownloadOptions {
   totalTimeoutMs?: number
   responseTimeoutMs?: number
   readTimeoutMs?: number
+  /** 仅批量任务使用：响应头到达后预约读取预算，不另发探测请求。 */
+  beforeRead?: (total?: number) => number
   onProgress: (received: number, total?: number) => void
 }
 
@@ -18,6 +20,7 @@ export async function fetchMediaBlob(
     totalTimeoutMs = 120000,
     responseTimeoutMs = 8000,
     readTimeoutMs = 15000,
+    beforeRead,
   }: DownloadOptions,
   kind: 'video' | 'image' | 'audio' = 'video',
   maxBytes = SINGLE_BUFFER_BYTES,
@@ -77,6 +80,7 @@ export async function fetchMediaBlob(
     }
     const length = Number(response.headers.get('Content-Length'))
     const total = Number.isFinite(length) && length > 0 ? length : undefined
+    if (beforeRead) maxBytes = Math.min(maxBytes, beforeRead(total))
     if (total && total > maxBytes)
       throw new MediaDownloadError('TOO_LARGE', '文件超过当前打包上限，请逐项下载')
     reader = response.body.getReader()

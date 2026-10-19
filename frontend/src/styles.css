@@ -76,6 +76,26 @@ a {
 
 .parser-card,
 .result-card,
+.download-help {
+  margin-top: 16px;
+  border-top: 1px solid #e8ebf1;
+  padding-top: 12px;
+}
+
+.download-help summary {
+  width: fit-content;
+  padding: 6px 0;
+  color: #5f6b82;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.download-help summary:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 4px;
+  border-radius: 3px;
+}
+
 .message-card {
   border: 1px solid #e7eaf0;
   border-radius: 22px;

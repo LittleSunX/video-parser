@@ -25,8 +25,14 @@ export function useVideoPage() {
     computed(() => (loading.value ? null : video.value)),
     showNotice,
   )
-  const { stopBatchDownload, cancelVideoDownload, downloadStatus, coverDownload, musicDownload } =
-    downloads
+  const {
+    stopBatchDownload,
+    cancelVideoDownload,
+    downloadStatus,
+    coverDownload,
+    musicDownload,
+    imageDownload,
+  } = downloads
   let parseController: AbortController | undefined
   const canSubmit = computed(() => input.value.trim().length > 0 && !loading.value)
   const livePhotoCount = computed(
@@ -71,6 +77,7 @@ export function useVideoPage() {
     cancelVideoDownload()
     coverDownload.reset()
     musicDownload.reset()
+    imageDownload.reset()
     downloadStatus.value = ''
     const controller = new AbortController()
     parseController = controller
@@ -149,6 +156,7 @@ export function useVideoPage() {
     cancelVideoDownload()
     coverDownload.reset()
     musicDownload.reset()
+    imageDownload.reset()
     downloadStatus.value = ''
     input.value = ''
     video.value = null

@@ -18,6 +18,8 @@ export interface VideoInfo {
   /** 时长，单位为毫秒。 */
   duration?: number
   videoUrl?: string
+  /** 与 videoUrl 对应的上游文件字节数；未知时省略，仍需遵守实际接收上限。 */
+  videoSize?: number
   images?: ImageAsset[]
   musicUrl?: string
   musicTitle?: string

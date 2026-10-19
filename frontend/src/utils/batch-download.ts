@@ -112,64 +112,110 @@ export async function downloadMediaArchive(
       `第 ${session.partNumber} 包已准备好（${session.part.count} 项），请点击保存${final ? '，这是最后一包' : '后继续下一包'}`,
     )
   }
+  type Outcome = { blob: Blob; error?: never } | { blob?: never; error: unknown }
+  let prefetched:
+    { index: number; controller: AbortController; result: Promise<Outcome> } | undefined
+  const pendingBytes = new Map<number, number>()
+
+  async function discardPrefetch() {
+    const pending = prefetched
+    if (!pending) return
+    prefetched = undefined
+    pending.controller.abort()
+    await pending.result
+    pendingBytes.delete(pending.index)
+    update(pending.index, 'pending', '等待获取')
+  }
+
+  async function receive(
+    index: number,
+    limit: number,
+    taskSignal: AbortSignal,
+    canPrefetch: boolean,
+  ): Promise<Blob> {
+    const job = jobs[index]
+    const kind = job.filename.endsWith('.mp4') ? 'video' : 'image'
+    let reservedLimit = limit
+    update(index, 'receiving', '正在连接')
+    const options = {
+      signal: taskSignal,
+      totalTimeoutMs: 0,
+      beforeRead(total?: number) {
+        // 已知小图片先预约自身字节，下一张仅使用剩余预算；未知大小与视频保持串行。
+        if (
+          canPrefetch &&
+          kind === 'image' &&
+          total &&
+          Number.isSafeInteger(total) &&
+          total <= limit / 2 &&
+          jobs[index + 1] &&
+          !jobs[index + 1].filename.endsWith('.mp4') &&
+          !prefetched
+        ) {
+          reservedLimit = total
+          const controller = new AbortController()
+          const cancel = () => controller.abort(signal.reason)
+          signal.addEventListener('abort', cancel, { once: true })
+          const result = receive(index + 1, limit - total, controller.signal, false)
+            .then(
+              (blob): Outcome => ({ blob }),
+              (error): Outcome => ({ error }),
+            )
+            .finally(() => signal.removeEventListener('abort', cancel))
+          prefetched = { index: index + 1, controller, result }
+        }
+        return reservedLimit
+      },
+      onProgress(bytes: number) {
+        if (taskSignal.aborted) return
+        pendingBytes.set(index, bytes)
+        update(index, 'receiving', `已获取 ${(bytes / 1024 / 1024).toFixed(1)} MB`)
+        const inFlight = [...pendingBytes.values()].reduce((sum, value) => sum + value, 0)
+        onProgress(
+          `正在获取 ${index + 1} / ${jobs.length}，累计 ${((received + inFlight) / 1024 / 1024).toFixed(1)} MB`,
+        )
+      },
+    }
+    try {
+      return await fetchMediaBlob(job.url, options, kind, limit)
+    } catch (error) {
+      taskSignal.throwIfAborted()
+      if (canPrefetch) await discardPrefetch()
+      if (error instanceof MediaDownloadError && error.code === 'TOO_LARGE') throw error
+      reservedLimit = limit
+      pendingBytes.delete(index)
+      return fetchMediaBlob(
+        buildDownloadUrl(job.url, job.filename),
+        {
+          ...options,
+          responseTimeoutMs: 30000,
+          readTimeoutMs: 45000,
+        },
+        kind,
+        limit,
+      )
+    }
+  }
+
   for (let index = session.nextIndex; index < jobs.length; index++) {
     const job = jobs[index]
     signal.throwIfAborted()
 
     try {
-      update(index, 'receiving', '正在连接')
-      const options = {
-        signal,
-        totalTimeoutMs: 0,
-        onProgress: (bytes: number) => {
-          update(index, 'receiving', `已获取 ${(bytes / 1024 / 1024).toFixed(1)} MB`)
-          onProgress(
-            `正在获取 ${index + 1} / ${jobs.length}，累计 ${((received + bytes) / 1024 / 1024).toFixed(1)} MB`,
-          )
-        },
-      }
-      const kind = job.filename.endsWith('.mp4') ? 'video' : 'image'
       let blob: Blob
-      try {
-        blob = await fetchMediaBlob(job.url, options, kind, session.maxPartBytes - received)
-      } catch (error) {
-        signal.throwIfAborted()
-        if (error instanceof MediaDownloadError && error.code === 'TOO_LARGE') {
-          if (session.files.size) {
-            update(index, 'pending', '等待下一包')
-            await preparePart(false)
-            return
-          }
-          throw error
-        }
-        try {
-          blob = await fetchMediaBlob(
-            buildDownloadUrl(job.url, job.filename),
-            {
-              ...options,
-              // 给 Worker 的上游超时留出传输余量，同时保护浏览器到代理的停滞。
-              responseTimeoutMs: 30000,
-              readTimeoutMs: 45000,
-            },
-            kind,
-            session.maxPartBytes - received,
-          )
-        } catch (fallbackError) {
-          signal.throwIfAborted()
-          if (
-            fallbackError instanceof MediaDownloadError &&
-            fallbackError.code === 'TOO_LARGE' &&
-            session.files.size
-          ) {
-            update(index, 'pending', '等待下一包')
-            await preparePart(false)
-            return
-          }
-          throw fallbackError
-        }
+      if (prefetched?.index === index) {
+        const pending = prefetched
+        prefetched = undefined
+        const outcome = await pending.result
+        if (outcome.error !== undefined) throw outcome.error
+        if (!outcome.blob) throw new MediaDownloadError('NETWORK', '下载失败，请重试')
+        blob = outcome.blob
+      } else {
+        blob = await receive(index, session.maxPartBytes - received, signal, true)
       }
       signal.throwIfAborted()
       session.files.set(job.filename, blob)
+      pendingBytes.delete(index)
       received += blob.size
       session.nextIndex = index + 1
       update(index, 'ready', '已获取')
@@ -178,7 +224,13 @@ export async function downloadMediaArchive(
         return
       }
     } catch (error) {
+      await discardPrefetch()
       signal.throwIfAborted()
+      if (error instanceof MediaDownloadError && error.code === 'TOO_LARGE' && session.files.size) {
+        update(index, 'pending', '等待下一包')
+        await preparePart(false)
+        return
+      }
       const reason =
         error instanceof MediaDownloadError
           ? error
