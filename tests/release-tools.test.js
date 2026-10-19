@@ -548,3 +548,29 @@ test('标题必需，作者、封面、音乐和无水印质量下限可作为�
     /布尔值/,
   )
 })
+
+test('separate-version dry run is offline and missing Worker tags still fail', async () => {
+  const frontendCommit = 'b'.repeat(40)
+  const fetchFn = vi.fn()
+  const result = await checkRelease(
+    {
+      frontend: 'https://frontend',
+      worker: 'https://worker',
+      frontendCommit,
+      workerCommit: commit,
+      dryRun: true,
+    },
+    fetchFn,
+  )
+  assert.equal(result.expectedFrontendCommit, frontendCommit)
+  assert.equal(result.expectedWorkerCommit, commit)
+  assert.equal(fetchFn.mock.calls.length, 0)
+  const missingTag = compareVersions(
+    { commit: frontendCommit, builtAt: timestamp },
+    { ...health, data: { ...health.data, versionTag: null } },
+    frontendCommit,
+    commit,
+  )
+  assert.equal(missingTag.passed, false)
+  assert.deepEqual(missingTag.failures, ['Worker 未标记完整提交版本'])
+})

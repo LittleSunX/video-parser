@@ -52,6 +52,7 @@ const {
   handleOpenVideoLink,
   handleProxyDownloadVideo,
   coverDownload,
+  imageDownload,
   handleDownloadImage,
   handleDownloadLivePhoto,
   handleDownloadAllPreferred,
@@ -268,17 +269,18 @@ function platformName(platform: VideoInfo['platform']) {
           @reparse="handleParse"
         />
         <MediaDownloadStatus
+          label="图片"
+          :download="imageDownload"
+          :can-reparse="canSubmit"
+          @reparse="handleParse"
+        />
+        <MediaDownloadStatus
           label="背景音乐"
           :download="musicDownload"
           :can-reparse="canSubmit"
           @reparse="handleParse"
         />
 
-        <p v-if="video.mediaType === 'image' && hasArchiveDownloads" class="download-tip">
-          批量下载保存为 ZIP，每包媒体内容最多
-          {{ batchPartLimitMiB }} MB，超出会分包保存；单个文件超过 {{ batchPartLimitMiB }} MB
-          请逐项下载。
-        </p>
         <p v-if="video.mediaType === 'image' && batchProgress" class="download-tip" role="status">
           {{ batchProgress }}
         </p>
@@ -342,10 +344,6 @@ function platformName(platform: VideoInfo['platform']) {
         >
           取消下载并释放暂存文件
         </button>
-        <p v-if="video.mediaType === 'image' && hasArchiveDownloads" class="download-tip">
-          小作品自动保存一包；大作品请逐包点击保存，再继续下一包。中途失败可重试未完成项。当前 ZIP
-          可在 30 秒内再次保存；开始新下载会释放上一份暂存。实际保存状态请查看浏览器下载列表。
-        </p>
         <div
           v-if="downloadStatus"
           class="download-status"
@@ -378,14 +376,27 @@ function platformName(platform: VideoInfo['platform']) {
             重新解析后下载
           </button>
         </div>
-        <p v-if="video.mediaType === 'video'" class="download-tip">
-          点击下载后请保持页面打开，接收完成会自动请求保存。若浏览器未保存，可在 30
-          秒内再次保存；也可使用备用下载。打开直链需从播放器菜单手动保存。
-        </p>
-        <p v-else class="download-tip">
-          实况作品会优先提供 MP4 动态轨；只有明确命中无水印字段时才标记“无水印原图”，避免把普通 CDN
-          图片误标为无水印。
-        </p>
+        <details class="download-help">
+          <summary>下载说明</summary>
+          <p class="download-tip">
+            下载时请保持页面打开，接收完成会自动请求保存。若浏览器未保存，可在 30
+            秒内再次保存；开始新下载会释放上一份暂存。实际保存状态请查看浏览器下载列表。
+          </p>
+          <p v-if="video.mediaType === 'video'" class="download-tip">
+            下载遇到问题可使用备用下载；打开直链需从播放器菜单手动保存。
+          </p>
+          <template v-else>
+            <p v-if="hasArchiveDownloads" class="download-tip">
+              批量下载保存为 ZIP，每包媒体内容最多 {{ batchPartLimitMiB }} MB，超出会分包保存；
+              单个文件超过 {{ batchPartLimitMiB }} MB 请逐项下载。小作品自动保存一包；
+              大作品请逐包点击保存，再继续下一包。中途失败可重试未完成项。
+            </p>
+            <p class="download-tip">
+              实况作品优先提供 MP4 动态视频；静态图片会区分“无水印原图”和“高清原图”。
+              只有来源明确提供无水印图片时，才会标记“无水印原图”。
+            </p>
+          </template>
+        </details>
       </div>
 
       <div v-if="video.mediaType === 'video'" class="cover-wrap">

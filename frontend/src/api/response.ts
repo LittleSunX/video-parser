@@ -61,6 +61,15 @@ export function readVideoPayload(payload: unknown, response: Response): VideoInf
   }
   const images = data.images as VideoInfo['images']
   if (
+    data.videoSize !== undefined &&
+    (data.mediaType !== 'video' ||
+      typeof data.videoSize !== 'number' ||
+      !Number.isSafeInteger(data.videoSize) ||
+      data.videoSize <= 0)
+  ) {
+    throw new ParseError('INVALID_RESPONSE', '视频大小信息异常，请重新解析')
+  }
+  if (
     data.imagesComplete !== undefined &&
     (typeof data.imagesComplete !== 'boolean' ||
       data.mediaType !== 'image' ||

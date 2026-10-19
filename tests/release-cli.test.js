@@ -219,3 +219,50 @@ test('本地 CLI 收到非 JSON 下载 429 也停止后续样本', async () => {
     },
   )
 })
+
+test('separate frontend and Worker commits are checked independently by CLI', async () => {
+  const frontendCommit = 'b'.repeat(40)
+  await fixture(
+    (request, response) =>
+      json(
+        response,
+        request.url === '/version.json' ? { commit: frontendCommit, builtAt: timestamp } : health,
+      ),
+    async (base) => {
+      const args = [
+        '--frontend',
+        base,
+        '--worker',
+        base,
+        '--frontend-commit',
+        frontendCommit,
+        '--worker-commit',
+        commit,
+      ]
+      const matching = await runCli('check-release.mjs', args)
+      assert.equal(matching.code, 0, matching.stderr)
+      assert.equal(JSON.parse(matching.stdout).expectedFrontendCommit, frontendCommit)
+      assert.equal(JSON.parse(matching.stdout).expectedWorkerCommit, commit)
+      const mismatch = await runCli('check-release.mjs', [...args.slice(0, -1), frontendCommit])
+      assert.equal(mismatch.code, 1)
+      assert.deepEqual(JSON.parse(mismatch.stdout).failures, ['Worker 提交与预期版本不一致'])
+    },
+  )
+})
+
+test.each([
+  ['--frontend-commit', commit],
+  ['--worker-commit', commit],
+  ['--frontend-commit', commit, '--worker-commit', commit, '--commit', commit],
+])('CLI rejects incomplete or conflicting version flags %s', async (...flags) => {
+  const result = await runCli('check-release.mjs', [
+    '--frontend',
+    'https://frontend.example',
+    '--worker',
+    'https://worker.example',
+    '--dry-run',
+    ...flags,
+  ])
+  assert.equal(result.code, 1)
+  assert.match(result.stderr, /同时指定.*不能混用/)
+})

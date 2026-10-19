@@ -81,6 +81,16 @@ export function mapItemToVideoInfo(
     )
   }
 
+  const playableUrl = toPlayableUrl(normalizeUrl(videoUrl))
+  // 仅使用所选码率流的大小；变换播放地址后不沿用原文件大小。
+  const videoSize =
+    bestBitRateStream &&
+    playableUrl === normalizeUrl(bestBitRateStream.url) &&
+    Number.isSafeInteger(bestBitRateStream.fileSize) &&
+    bestBitRateStream.fileSize > 0
+      ? bestBitRateStream.fileSize
+      : undefined
+
   return {
     imagesComplete: true,
     video: {
@@ -92,7 +102,8 @@ export function mapItemToVideoInfo(
       author: item.author?.nickname ? normalizeText(item.author.nickname) : undefined,
       cover: cover ? normalizeUrl(cover) : undefined,
       duration: readNumber(item.duration) || readNumber(video.duration) || undefined,
-      videoUrl: toPlayableUrl(normalizeUrl(videoUrl)),
+      videoUrl: playableUrl,
+      ...(videoSize === undefined ? {} : { videoSize }),
       musicUrl: musicUrl ? normalizeUrl(musicUrl) : undefined,
       musicTitle: item.music?.title ? normalizeText(item.music.title) : undefined,
     },

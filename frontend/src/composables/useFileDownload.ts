@@ -20,7 +20,7 @@ interface FileDownloadOptions {
 
 type DownloadState = 'receiving' | 'handed-off' | 'fallback' | 'cancelled' | 'failed'
 
-/** 音乐优先直连，失败时回退一次代理；封面沿用代理，流式读取时更新进度。 */
+/** 单文件优先直连，失败时回退一次代理，流式读取时更新进度。 */
 export function useFileDownload({
   label,
   kind,
@@ -122,25 +122,23 @@ export function useFileDownload({
           kind,
         )
       let blob: Blob
-      if (kind === 'audio') {
-        try {
-          blob = await fetchMediaBlob(
-            target.url,
-            { ...options, responseTimeoutMs: 8000, readTimeoutMs: 15000 },
-            kind,
-          )
-        } catch (error) {
-          controller.signal.throwIfAborted()
-          if (
-            !(error instanceof MediaDownloadError) ||
-            !['NETWORK', 'TIMEOUT', 'EXPIRED', 'INVALID_MEDIA'].includes(error.code)
-          )
-            throw error
-          download.progress = undefined
-          download.status = '正在重新连接' + label + '下载…'
-          blob = await fetchFromProxy()
-        }
-      } else blob = await fetchFromProxy()
+      try {
+        blob = await fetchMediaBlob(
+          target.url,
+          { ...options, responseTimeoutMs: 8000, readTimeoutMs: 15000 },
+          kind,
+        )
+      } catch (error) {
+        controller.signal.throwIfAborted()
+        if (
+          !(error instanceof MediaDownloadError) ||
+          !['NETWORK', 'TIMEOUT', 'EXPIRED', 'INVALID_MEDIA'].includes(error.code)
+        )
+          throw error
+        download.progress = undefined
+        download.status = '正在重新连接' + label + '下载…'
+        blob = await fetchFromProxy()
+      }
       if (activeController !== controller) return
       prepared.prepare(
         blob,
