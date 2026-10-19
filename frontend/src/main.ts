@@ -21,6 +21,7 @@ void import('./application')
     mountApplication()
     window.dispatchEvent(new CustomEvent('video-parser:startup', { detail: 'ready' }))
   })
-  .catch(() => {
+  .catch((error: unknown) => {
+    console.error('应用启动失败', error)
     window.dispatchEvent(new CustomEvent('video-parser:startup', { detail: 'failed' }))
   })
