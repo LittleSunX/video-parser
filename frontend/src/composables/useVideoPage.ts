@@ -1,5 +1,12 @@
-import { ref, computed, onScopeDispose } from 'vue'
+import { ref, shallowRef, computed, onScopeDispose } from 'vue'
 import { parseVideo } from '../api/video'
+import {
+  createParseDiagnostics,
+  ParseError,
+  serializeParseDiagnostics,
+  type ParseDiagnostics,
+} from '../api/parse-error'
+import { copyText } from '../utils/download'
 import type { VideoInfo } from '../types/video'
 import { useNotice } from './useNotice'
 import { imageDownloadLabel, imageDownloadTargets, useMediaDownloads } from './useMediaDownloads'
@@ -8,6 +15,9 @@ export function useVideoPage() {
   const input = ref('')
   const loading = ref(false)
   const errorMessage = ref('')
+  const errorDiagnostics = shallowRef<ParseDiagnostics>()
+  const copyingProblemInfo = ref(false)
+  let copyRequestNumber = 0
   const video = ref<VideoInfo | null>(null)
   const previewing = ref(false)
   const { notice, showNotice, clearNotice } = useNotice()
@@ -55,6 +65,8 @@ export function useVideoPage() {
   async function handleParse() {
     if (!canSubmit.value) return
 
+    resetProblemInfo()
+    const started = performance.now()
     stopBatchDownload()
     cancelVideoDownload()
     coverDownload.reset()
@@ -98,6 +110,16 @@ export function useVideoPage() {
         : error instanceof Error
           ? error.message
           : '作品解析失败，请稍后重试'
+      if (errorMessage.value) {
+        errorDiagnostics.value =
+          error instanceof ParseError && error.diagnostics
+            ? error.diagnostics
+            : createParseDiagnostics({
+                code: controller.signal.aborted ? 'CLIENT_TIMEOUT' : 'UNKNOWN_ERROR',
+                stage: 'request',
+                durationMs: performance.now() - started,
+              })
+      }
     } finally {
       window.clearTimeout(timeout)
       if (parseController === controller) {
@@ -108,6 +130,8 @@ export function useVideoPage() {
   }
 
   function cancelParse() {
+    resetProblemInfo()
+    errorMessage.value = ''
     parseController?.abort()
     parseController = undefined
     loading.value = false
@@ -117,6 +141,7 @@ export function useVideoPage() {
   }
 
   function handleClear() {
+    resetProblemInfo()
     parseController?.abort()
     parseController = undefined
     loading.value = false
@@ -132,7 +157,31 @@ export function useVideoPage() {
     clearNotice()
   }
 
+  function resetProblemInfo() {
+    copyRequestNumber++
+    errorDiagnostics.value = undefined
+    copyingProblemInfo.value = false
+  }
+
+  async function copyProblemInfo() {
+    const report = errorDiagnostics.value
+    if (!report || loading.value || copyingProblemInfo.value) return
+    const requestNumber = ++copyRequestNumber
+    copyingProblemInfo.value = true
+    try {
+      await copyText(serializeParseDiagnostics(report))
+      if (requestNumber === copyRequestNumber && report === errorDiagnostics.value)
+        showNotice('问题信息已复制，不含分享文案和媒体地址')
+    } catch {
+      if (requestNumber === copyRequestNumber && report === errorDiagnostics.value)
+        showNotice('复制失败，请重试或检查浏览器的剪贴板权限', 6000)
+    } finally {
+      if (requestNumber === copyRequestNumber) copyingProblemInfo.value = false
+    }
+  }
+
   onScopeDispose(() => {
+    resetProblemInfo()
     parseController?.abort()
     parseController = undefined
   })
@@ -140,6 +189,9 @@ export function useVideoPage() {
     input,
     loading,
     errorMessage,
+    errorDiagnostics,
+    copyingProblemInfo,
+    copyProblemInfo,
     video,
     previewing,
     notice,

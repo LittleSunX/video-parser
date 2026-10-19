@@ -1,7 +1,3 @@
-import { createApp } from 'vue'
-import App from './App.vue'
-import './styles.css'
-
 // 利用用户粘贴文案前的时间建立 API 连接；不提前提交解析请求。
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
 if (apiBaseUrl) {
@@ -19,4 +15,12 @@ if (apiBaseUrl) {
   }
 }
 
-createApp(App).mount('#app')
+// 入口不静态导入应用样式，让资源未到时仍能显示 HTML 中的启动反馈。
+void import('./application')
+  .then(({ mountApplication }) => {
+    mountApplication()
+    window.dispatchEvent(new CustomEvent('video-parser:startup', { detail: 'ready' }))
+  })
+  .catch(() => {
+    window.dispatchEvent(new CustomEvent('video-parser:startup', { detail: 'failed' }))
+  })

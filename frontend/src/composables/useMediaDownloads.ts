@@ -202,6 +202,8 @@ export function useMediaDownloads(
     try {
       const blob = await fetchMediaBlob(url, {
         signal: controller.signal,
+        // 持续收到数据时不限总时长，连接和读取停滞仍由各自超时保护。
+        totalTimeoutMs: 0,
         onProgress(received, total) {
           if (downloadController !== controller) return
           downloadStatus.value = total

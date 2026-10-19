@@ -1,4 +1,5 @@
 import type { VideoInfo } from '../types/video'
+import { ParseError } from './parse-error'
 
 function httpMessage(response: Response): string {
   if (response.status === 429) {
@@ -22,23 +23,24 @@ export async function readVideoResponse(
     payload = await response.json()
   } catch {
     signal?.throwIfAborted()
-    throw new Error(httpMessage(response))
+    throw new ParseError('INVALID_RESPONSE', httpMessage(response))
   }
   return readVideoPayload(payload, response)
 }
 
 /** JSON 与渐进结果使用相同的资源和状态校验。 */
 export function readVideoPayload(payload: unknown, response: Response): VideoInfo {
-  if (response.status === 429) throw new Error(httpMessage(response))
-  if (!payload || typeof payload !== 'object') throw new Error(httpMessage(response))
+  if (response.status === 429) throw new ParseError('RATE_LIMITED', httpMessage(response))
+  if (!payload || typeof payload !== 'object')
+    throw new ParseError('INVALID_RESPONSE', httpMessage(response))
   const result = payload as Record<string, unknown>
   if (result.success === false && result.error && typeof result.error === 'object') {
     const message = (result.error as Record<string, unknown>).message
     if (typeof message === 'string' && message.trim() && message.length <= 300)
-      throw new Error(message)
+      throw new ParseError((result.error as Record<string, unknown>).code, message)
   }
   if (!response.ok || result.success !== true || !result.data || typeof result.data !== 'object') {
-    throw new Error(httpMessage(response))
+    throw new ParseError('HTTP_ERROR', httpMessage(response))
   }
   const data = result.data as Record<string, unknown>
   if (
@@ -55,7 +57,7 @@ export function readVideoPayload(payload: unknown, response: Response): VideoInf
           (image) => image && typeof image === 'object' && typeof image.url === 'string',
         )))
   ) {
-    throw new Error('作品信息不完整，请重新解析')
+    throw new ParseError('INVALID_RESPONSE', '作品信息不完整，请重新解析')
   }
   const images = data.images as VideoInfo['images']
   if (
@@ -64,7 +66,7 @@ export function readVideoPayload(payload: unknown, response: Response): VideoInf
       data.mediaType !== 'image' ||
       (data.imagesComplete && (!images?.length || !images.every((image) => image.url.trim()))))
   ) {
-    throw new Error('作品资源状态异常，请重新解析')
+    throw new ParseError('INVALID_RESPONSE', '作品资源状态异常，请重新解析')
   }
   if (
     (data.parseStatus !== undefined || data.parseReason !== undefined) &&
@@ -74,7 +76,7 @@ export function readVideoPayload(payload: unknown, response: Response): VideoInf
         (data.parseReason === 'timeout' || data.parseReason === 'exhausted'))
     )
   ) {
-    throw new Error('作品解析状态异常，请重新解析')
+    throw new ParseError('INVALID_RESPONSE', '作品解析状态异常，请重新解析')
   }
   return data as unknown as VideoInfo
 }
