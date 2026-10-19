@@ -11,6 +11,8 @@
   <a href="https://wind-video.ccwu.cc/"><strong>🌐 在线体验</strong></a>
   ·
   <a href="https://api.wind-video.ccwu.cc/api/health">API 状态</a>
+  ·
+  <a href="RELEASE_CHECK.md">检查线上部署版本</a>
 </p>
 
 <p>
@@ -490,19 +492,9 @@ GitHub Actions 会在 main 推送和 Pull Request 时，分别在 Windows 与 Li
 
 发布工具采用当前完整 Git SHA 给 Worker 标记版本；实际发布要求工作区已提交。`npm run release:worker` 只预览命令，`npm run release:worker -- --dry-run` 仅在本地打包，`npm run deploy:worker` 使用既有 Wrangler 登录或环境凭据发布。根目录与 Worker workspace 的部署入口都使用同一版本检查。
 
-合并、通过 `npm run check` 后，先发布 Worker，再从同一个提交发布前端，随后核对两个服务：
+合并、通过 `npm run check` 后，先发布 Worker，再从同一个提交发布前端，随后核对两个服务。
 
-```bash
-npm run release:check -- --frontend https://your-frontend-domain.example --worker https://your-worker-domain.example --commit <完整Git-SHA>
-```
-
-仅修改前端且接口保持兼容时，可以保留原 Worker 版本，分别指定两个预期提交：
-
-```bash
-npm run release:check -- --frontend https://your-frontend-domain.example --worker https://your-worker-domain.example --frontend-commit <前端完整Git-SHA> --worker-commit <Worker完整Git-SHA>
-```
-
-两个版本参数必须一起提供，不能与 `--commit` 混用。不指定版本时仍要求两端均匹配当前 Git 提交；指定 `--commit` 时两端都与该提交比较。分别指定版本不会跳过 Worker 健康、完整提交 tag、版本 ID 或时间校验。缺少 tag、与各自预期不一致、版本接口不可读或时间无效均会失败。报告中的 `expectedFrontendCommit` 与 `expectedWorkerCommit` 分别表示预期提交，`expectedCommit` 保留为前端预期提交以兼容原输出。
+👉 **[检查线上部署版本](RELEASE_CHECK.md)**：包含对照主干最新提交的可复制命令、结果解读，以及前后端分别发布时的检查方式。
 
 本次文件大小提示是新增的可选字段：新前端兼容未提供大小的旧 Worker；要启用已知大视频提前交给浏览器的优化，需要同时更新 Worker。
 
