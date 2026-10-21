@@ -292,6 +292,10 @@ flowchart TB
 - TypeScript
 - 原生 CSS
 
+页面采用暖调编辑风格，图文支持大图、缩略图、总览与放大查看。视频仅显示封面，实况仅显示静态图片，不加载播放器；页面聚焦内容确认与下载。图文可切换动态优先与仅保存原图，下载继续使用原有的进度、取消、再次保存和 ZIP 分包流程。
+
+页面布局位于 `frontend/src/App.vue`，静态图文预览位于 `frontend/src/components/ImageGallery.vue`，下载反馈统一使用 `frontend/src/components/DownloadTask.vue`，文件明细默认收起。
+
 ### 后端
 
 - Cloudflare Workers

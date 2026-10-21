@@ -16,6 +16,7 @@ interface FileDownloadOptions {
   getTarget: () => { url: string; filename: string } | undefined
   showNotice: (message: string, duration?: number) => void
   bufferBudget?: DownloadBufferBudget
+  canStart?: () => boolean
 }
 
 type DownloadState = 'receiving' | 'handed-off' | 'fallback' | 'cancelled' | 'failed'
@@ -27,6 +28,7 @@ export function useFileDownload({
   getTarget,
   showNotice,
   bufferBudget = createDownloadBufferBudget(),
+  canStart = () => true,
 }: FileDownloadOptions) {
   let activeController: AbortController | undefined
   let nativeDispose: (() => void) | undefined
@@ -83,7 +85,7 @@ export function useFileDownload({
 
   async function start() {
     const target = getTarget()
-    if (!target || download.downloading) return
+    if (!target || download.downloading || !canStart()) return
     const release = bufferBudget.acquire(owner, PAGE_BUFFER_BUDGET_BYTES)
     if (!release) {
       showNotice('请先完成或取消当前下载任务')
@@ -185,7 +187,7 @@ export function useFileDownload({
 
   function startBrowserDownload() {
     const target = getTarget()
-    if (!target || download.downloading) return
+    if (!target || download.downloading || !canStart()) return
     if (!bufferBudget.clearRetained()) {
       showNotice('请先完成或取消当前下载任务')
       return
