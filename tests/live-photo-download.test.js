@@ -7,6 +7,8 @@ import { saveBlob } from '../frontend/src/utils/auto-download'
 import { buildLivePhotoFilename, triggerDownload } from '../frontend/src/utils/download'
 import { SINGLE_BUFFER_BYTES } from '../frontend/src/utils/download-buffer'
 import * as mediaArchive from '../frontend/src/utils/media-archive'
+import * as batchDownload from '../frontend/src/utils/batch-download'
+import { MediaDownloadError } from '../frontend/src/utils/download-error'
 
 vi.mock('../frontend/src/api/video', () => ({ parseVideo: vi.fn() }))
 vi.mock('../frontend/src/utils/auto-download', async (importOriginal) => ({
@@ -112,6 +114,7 @@ test.each([true, false])(
     await app.handleDownloadLivePhoto(0)
     expect(fetch).toHaveBeenCalledOnce()
     expect(fetch.mock.calls[0][0]).toBe(secondLiveUrl)
+    expect(app.downloadLabel.value).toBe('第 2 张实况视频')
     expect(fetch.mock.calls[0][1]).toMatchObject({
       mode: 'cors',
       credentials: 'omit',
@@ -155,6 +158,83 @@ test.each([true, false])(
     expect(app.parseWarning.value).toBe(warning)
   },
 )
+
+test.each(['waiting-save', 'waiting-next'])(
+  'an unrelated download cannot discard a ZIP that is %s',
+  async (phase) => {
+    vi.spyOn(batchDownload, 'downloadMediaArchive').mockImplementation(async (...args) => {
+      args[4].part = {
+        blob: new Blob(['prepared zip']),
+        filename: 'part-1.zip',
+        number: 1,
+        count: 1,
+        final: false,
+      }
+    })
+    const fetch = vi.fn(
+      async () => new Response('music', { headers: { 'Content-Type': 'audio/mpeg' } }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const app = page(
+      gallery([
+        { url: 'https://p.douyinpic.com/1.jpg', livePhotoUrl: firstLiveUrl },
+        { url: 'https://p.douyinpic.com/2.jpg', livePhotoUrl: secondLiveUrl },
+      ]),
+    )
+    await app.handleDownloadAllPreferred()
+    if (phase === 'waiting-next') app.saveBatchPart()
+    const part = app.batchPart.value
+    const canContinue = app.batchCanContinue.value
+    await app.musicDownload.start()
+    await app.coverDownload.start()
+    await app.handleDownloadImage(1)
+    await app.handleDownloadLivePhoto(1)
+    app.imageDownload.startBrowserDownload()
+    app.musicDownload.startBrowserDownload()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(triggerDownload).not.toHaveBeenCalled()
+    expect(app.batchPart.value).toBe(part)
+    expect(app.batchCanContinue.value).toBe(canContinue)
+    expect(app.pendingBatch.value).toBe(true)
+    app.stopBatchDownload()
+    expect(app.pendingBatch.value).toBe(false)
+    await app.musicDownload.start()
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(app.musicDownload.state).toBe('handed-off')
+  },
+)
+
+test('a non-retryable batch error still has an explicit failure state', async () => {
+  vi.spyOn(batchDownload, 'downloadMediaArchive').mockRejectedValue(
+    new MediaDownloadError('EXPIRED', '资源已过期'),
+  )
+  const app = page(gallery([{ url: 'one.jpg' }, { url: 'two.jpg' }]))
+  await app.handleDownloadAllOriginals()
+  expect(app.batchCanRetry.value).toBe(false)
+  expect(app.batchFailed.value).toBe(true)
+  app.stopBatchDownload()
+  expect(app.batchFailed.value).toBe(false)
+})
+
+test('image feedback and save-again keep the identity of the file actually downloaded', async () => {
+  const fetch = vi.fn(
+    async () => new Response('image', { headers: { 'Content-Type': 'image/jpeg' } }),
+  )
+  vi.stubGlobal('fetch', fetch)
+  const parsed = gallery([
+    { url: 'https://p.douyinpic.com/one.jpg' },
+    { url: 'https://p.douyinpic.com/two.jpg' },
+  ])
+  const app = page(parsed)
+  await app.handleDownloadImage(1)
+  expect(app.imageDownloadName.value).toBe('第 2 张图片')
+  const filename = vi.mocked(saveBlob).mock.calls[0][1]
+  app.imageDownload.saveAgain()
+  expect(vi.mocked(saveBlob).mock.calls[1][1]).toBe(filename)
+  expect(fetch).toHaveBeenCalledOnce()
+  await app.handleDownloadImage(0)
+  expect(app.imageDownloadName.value).toBe('第 1 张图片')
+})
 
 test.each([
   ['CORS rejection', () => Promise.reject(new TypeError('Failed to fetch'))],

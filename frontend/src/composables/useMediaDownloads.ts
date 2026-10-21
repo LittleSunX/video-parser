@@ -7,7 +7,7 @@ import {
   type BatchItemStatus,
 } from '../utils/batch-download'
 import { MediaDownloadError } from '../utils/download-error'
-import { ref, onScopeDispose, type Ref } from 'vue'
+import { computed, ref, onScopeDispose, type Ref } from 'vue'
 import type { VideoInfo } from '../types/video'
 import { fetchMediaBlob } from '../utils/auto-download'
 import { useFileDownload } from './useFileDownload'
@@ -56,6 +56,19 @@ export function useMediaDownloads(
 ) {
   const bufferBudget = createDownloadBufferBudget()
   const selectedImageIndex = ref(0)
+  const imageDownloadName = computed(() => '第 ' + (selectedImageIndex.value + 1) + ' 张图片')
+  const batchPart = ref<{ number: number; count: number; size: number; final: boolean } | null>(
+    null,
+  )
+  const batchCanContinue = ref(false)
+  const pendingBatch = computed(() => !!batchPart.value || batchCanContinue.value)
+
+  function canStartSingleDownload() {
+    if (!pendingBatch.value) return true
+    showNotice('请先保存或结束当前分包任务')
+    return false
+  }
+
   const imageDownload = useFileDownload({
     label: '图片',
     kind: 'image',
@@ -68,6 +81,7 @@ export function useMediaDownloads(
     },
     showNotice,
     bufferBudget,
+    canStart: canStartSingleDownload,
   })
   const coverDownload = useFileDownload({
     label: '封面',
@@ -80,6 +94,7 @@ export function useMediaDownloads(
     },
     showNotice,
     bufferBudget,
+    canStart: canStartSingleDownload,
   })
   const musicDownload = useFileDownload({
     label: '背景音乐',
@@ -92,21 +107,20 @@ export function useMediaDownloads(
     },
     showNotice,
     bufferBudget,
+    canStart: canStartSingleDownload,
   })
   const batchDownloading = ref(false)
   const batchProgress = ref('')
   const batchItems = ref<BatchItemStatus[]>([])
   const batchCanRetry = ref(false)
+  const batchFailed = ref(false)
   const batchHasCache = ref(false)
-  const batchPart = ref<{ number: number; count: number; size: number; final: boolean } | null>(
-    null,
-  )
-  const batchCanContinue = ref(false)
   let batchSession: BatchSession | undefined
   let batchKey = ''
   let batchPreferLive = true
   const videoDownloading = ref(false)
   const downloadStatus = ref('')
+  const downloadLabel = ref('视频')
   const downloadState = ref<'receiving' | 'handed-off' | 'fallback' | 'cancelled' | 'failed'>(
     'receiving',
   )
@@ -140,13 +154,15 @@ export function useMediaDownloads(
     batchPrepared.save()
   }
 
-  function startNativeDownload(url: string, filename: string, message: string) {
+  function startNativeDownload(url: string, filename: string, message: string, label = '视频') {
+    if (!canStartSingleDownload()) return
     if (!bufferBudget.clearRetained()) {
       showNotice('请先完成或取消当前下载任务')
       return
     }
     const current = video.value
     const requestNumber = ++nativeRequestNumber
+    downloadLabel.value = label
     downloadNeedsReparse.value = false
     downloadState.value = 'fallback'
     downloadStatus.value = message + '，请查看浏览器下载列表。'
@@ -209,7 +225,7 @@ export function useMediaDownloads(
 
   /** 普通视频与单个实况共用直连、进度、缓冲保存及代理回退。 */
   async function downloadSingleVideo(url: string, filename: string, label: string) {
-    if (videoDownloading.value) return
+    if (videoDownloading.value || !canStartSingleDownload()) return
     const release = bufferBudget.acquire(videoOwner, PAGE_BUFFER_BUDGET_BYTES)
     if (!release) {
       showNotice('请先完成或取消当前下载任务')
@@ -223,6 +239,7 @@ export function useMediaDownloads(
     const controller = new AbortController()
     downloadController = controller
     videoDownloading.value = true
+    downloadLabel.value = label
     downloadState.value = 'receiving'
     downloadNeedsReparse.value = false
     downloadStatus.value = '正在连接下载…'
@@ -254,7 +271,7 @@ export function useMediaDownloads(
       } else {
         release()
         releaseVideoBuffer = undefined
-        startNativeDownload(url, filename, '已切换到备用下载')
+        startNativeDownload(url, filename, '已切换到备用下载', label)
       }
     } finally {
       release()
@@ -272,9 +289,9 @@ export function useMediaDownloads(
       if (!videoPrepared.save()) return
       downloadState.value = 'handed-off'
       downloadStatus.value = '已再次请求浏览器保存，请查看下载列表。'
-      showNotice('已再次请求保存视频', 6000)
+      showNotice('已再次请求保存' + downloadLabel.value, 6000)
     } catch {
-      showNotice('未能发起保存，请再次点击保存视频')
+      showNotice('未能发起保存，请再次点击保存' + downloadLabel.value)
     }
   }
 
@@ -305,7 +322,7 @@ export function useMediaDownloads(
   function handleDownloadImage(index: number) {
     const current = video.value
     const asset = current?.images?.[index]
-    if (!current || !asset?.url) return
+    if (!current || !asset?.url || !canStartSingleDownload()) return
     if (bufferBudget.busy.value) {
       showNotice('请先完成或取消当前下载任务')
       return
@@ -321,7 +338,7 @@ export function useMediaDownloads(
     return downloadSingleVideo(
       asset.livePhotoUrl,
       buildLivePhotoFilename(current, index),
-      '第 ' + (index + 1) + ' 个实况视频',
+      '第 ' + (index + 1) + ' 张实况视频',
     )
   }
 
@@ -351,6 +368,7 @@ export function useMediaDownloads(
     batchCanContinue.value = false
     batchItems.value = []
     batchCanRetry.value = false
+    batchFailed.value = false
     batchHasCache.value = false
   }
 
@@ -393,6 +411,7 @@ export function useMediaDownloads(
     releaseBatchBuffer = release
     batchPreferLive = preferLive
     batchCanRetry.value = false
+    batchFailed.value = false
     batchCanContinue.value = false
     batchItems.value = session.items.map((item) => ({ ...item }))
     batchProgress.value = '正在获取未完成的文件…'
@@ -433,6 +452,7 @@ export function useMediaDownloads(
       showNotice('已请求浏览器保存 ZIP，解压后可查看全部文件', 6000)
     } catch (error) {
       if (controller.signal.aborted || batchController !== controller) return
+      batchFailed.value = true
       if (session.part) {
         const part = session.part
         batchPrepared.prepare(part.blob, part.filename)
@@ -475,6 +495,7 @@ export function useMediaDownloads(
     const number = batchSession.part.number
     try {
       const final = saveArchivePart(batchSession, prepareAndSaveBatch)
+      batchFailed.value = false
       batchPart.value = null
       batchHasCache.value = false
       batchCanContinue.value = !final
@@ -492,6 +513,7 @@ export function useMediaDownloads(
     if (batchSession?.part) return saveBatchPart()
     try {
       if (!batchPrepared.save()) return
+      batchFailed.value = false
       batchProgress.value = '已再次请求浏览器保存当前 ZIP，请查看下载列表。'
       showNotice('已再次请求保存 ZIP', 6000)
     } catch {
@@ -528,6 +550,8 @@ export function useMediaDownloads(
     batchProgress,
     batchItems,
     batchCanRetry,
+    batchFailed,
+    pendingBatch,
     batchHasCache,
     batchPart,
     batchCanContinue,
@@ -536,6 +560,7 @@ export function useMediaDownloads(
     retryBatchDownload,
     videoDownloading,
     downloadStatus,
+    downloadLabel,
     downloadState,
     downloadNeedsReparse,
     handleCopyVideoUrl,
@@ -545,6 +570,7 @@ export function useMediaDownloads(
     handleProxyDownloadVideo,
     coverDownload,
     imageDownload,
+    imageDownloadName,
     handleDownloadImage,
     handleDownloadLivePhoto,
     handleDownloadAllPreferred,
