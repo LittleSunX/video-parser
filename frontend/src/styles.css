@@ -1,18 +1,18 @@
 :root {
   font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-  color: #322e28;
-  background: #f5f2eb;
+  color: var(--ink);
+  background: var(--page);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   color-scheme: light;
-  --page: #f5f2eb;
-  --paper: #fffcf6;
-  --ink: #322e28;
-  --muted: #777064;
-  --line: #ded8cc;
-  --accent: #ad452d;
-  --accent-hover: #913922;
-  --soft: #eee8de;
+  --page: #f5f6f7;
+  --paper: #ffffff;
+  --ink: #25282d;
+  --muted: #656b74;
+  --line: #e4e7ea;
+  --accent: #25282d;
+  --accent-hover: #3a3f46;
+  --soft: #eceef0;
   --serif: 'Songti SC', 'STSong', 'SimSun', serif;
 }
 
@@ -132,8 +132,8 @@ p {
     box-shadow 0.18s;
 }
 .input-row:focus-within {
-  border-color: #b87965;
-  box-shadow: 0 0 0 3px #ad452d0c;
+  border-color: #959da7;
+  box-shadow: 0 0 0 3px #25282d0c;
 }
 .input-row > .app-icon {
   color: var(--muted);
@@ -172,7 +172,7 @@ p {
   white-space: nowrap;
 }
 .parse-button:hover:not(:disabled) {
-  background: #4a4338;
+  background: var(--accent-hover);
 }
 .parse-button:disabled {
   opacity: 0.6;
@@ -212,7 +212,7 @@ p {
 .button-spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid #fffcf655;
+  border: 2px solid #ffffff55;
   border-top-color: var(--paper);
   border-radius: 50%;
   animation: spin 0.75s linear infinite;
@@ -332,7 +332,7 @@ p {
   left: 20px;
   border-radius: 4px;
   padding: 5px 9px;
-  background: #fffcf6ed;
+  background: #ffffffed;
   color: var(--ink);
   font-size: 11px;
   box-shadow: 0 1px 5px #00000012;
@@ -342,14 +342,14 @@ p {
   position: absolute;
   top: 16px;
   right: 16px;
-  background: #fffcf6ed;
+  background: #ffffffed;
 }
 .gallery-nav {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  background: #fffcf6ed;
-  border: 1px solid #ded8cc88;
+  background: #ffffffed;
+  border: 1px solid #e4e7ea88;
   box-shadow: 0 2px 8px #0000000c;
 }
 .gallery-prev {
@@ -399,7 +399,7 @@ p {
 .thumbnail[aria-pressed='true'] {
   padding: 2px;
   border: 2px solid var(--accent);
-  box-shadow: 0 3px 9px #42322314;
+  box-shadow: 0 3px 9px #25282d14;
 }
 .thumbnail img {
   width: 100%;
@@ -418,8 +418,8 @@ p {
   gap: 3px;
   border-radius: 3px;
   padding: 2px 4px;
-  color: #fffcf6;
-  background: #191713c9;
+  color: #ffffff;
+  background: #191b1fc9;
   font-size: 11px;
 }
 .thumbnail > span .app-icon {
@@ -571,7 +571,7 @@ p {
 .format-switch button[aria-pressed='true'] {
   color: var(--accent);
   background: var(--paper);
-  box-shadow: 0 1px 4px #42322314;
+  box-shadow: 0 1px 4px #25282d14;
 }
 .format-summary {
   min-height: 37px;
@@ -589,7 +589,7 @@ p {
   min-height: 50px;
   padding: 13px 18px;
   border-radius: 7px;
-  color: #fffaf4;
+  color: #ffffff;
   background: var(--accent);
   font-size: 14px;
   line-height: 1.5;
@@ -817,7 +817,7 @@ p {
   border-color: #cca08e;
 }
 .download-task.is-failed .task-heading {
-  color: var(--accent);
+  color: #983f2d;
 }
 .download-progress {
   display: block;
@@ -867,7 +867,7 @@ p {
   border-radius: 9px;
   padding: 12px 18px;
   background: var(--paper);
-  box-shadow: 0 6px 25px #42322314;
+  box-shadow: 0 6px 25px #25282d14;
   font-size: 13px;
   line-height: 1.6;
   text-align: center;
@@ -972,7 +972,7 @@ p {
   color: var(--ink);
 }
 .image-dialog::backdrop {
-  background: #231f1bbf;
+  background: #23262bbf;
   backdrop-filter: blur(5px);
 }
 .dialog-header {
@@ -1062,7 +1062,7 @@ p {
     padding: 10px 0 calc(12px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--line);
     background: var(--paper);
-    box-shadow: 0 -4px 20px #322e2809;
+    box-shadow: 0 -4px 20px #25282d09;
   }
   .mobile-download-inner {
     width: min(680px, calc(100% - 32px));
