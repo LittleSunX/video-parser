@@ -12,6 +12,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:selectedIndex': [index: number]
   save: [index: number]
+  saveLive: [index: number]
 }>()
 const view = ref<'single' | 'grid'>('single')
 const selected = computed(() => props.images[props.selectedIndex])
@@ -157,15 +158,34 @@ onBeforeUnmount(closeZoom)
         <span
           >第 {{ selectedIndex + 1 }} 张 ·
           {{ selected.livePhotoUrl ? '带动态实况' : '静态图片' }}</span
-        ><button
-          v-if="selected.url && images.length > 1"
-          type="button"
-          class="text-button"
-          :disabled="downloadDisabled"
-          @click="emit('save', selectedIndex)"
         >
-          <AppIcon name="download" />保存这张
-        </button>
+        <div v-if="images.length > 1" class="image-save-actions">
+          <button
+            v-if="selected.url"
+            type="button"
+            class="text-button"
+            :aria-label="
+              '保存第 ' +
+              (selectedIndex + 1) +
+              ' 张' +
+              (selected.watermarkFree ? '无水印原图' : '高清原图')
+            "
+            :disabled="downloadDisabled"
+            @click="emit('save', selectedIndex)"
+          >
+            <AppIcon name="download" />{{ selected.watermarkFree ? '无水印原图' : '高清原图' }}
+          </button>
+          <button
+            v-if="selected.livePhotoUrl"
+            type="button"
+            class="text-button"
+            :aria-label="'保存第 ' + (selectedIndex + 1) + ' 项动态 MP4'"
+            :disabled="downloadDisabled"
+            @click="emit('saveLive', selectedIndex)"
+          >
+            <AppIcon name="film" />动态 MP4
+          </button>
+        </div>
       </div>
       <div v-if="images.length > 1" class="thumbnails" aria-label="选择图片">
         <button

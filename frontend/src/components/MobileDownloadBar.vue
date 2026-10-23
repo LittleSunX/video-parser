@@ -1,18 +1,36 @@
 <script setup lang="ts">
+import { ref, toRef, watch } from 'vue'
+import { useElementVisibility } from '../composables/useElementVisibility'
 import AppIcon from './AppIcon.vue'
 
-defineProps<{
+const props = defineProps<{
   label: string
   summary: string
   disabled: boolean
   busy: boolean
   showTask: boolean
+  actionElement?: HTMLElement
 }>()
 defineEmits<{ download: []; details: [] }>()
+const barElement = ref<HTMLElement>()
+const inlineActionVisible = useElementVisibility(toRef(props, 'actionElement'))
+watch(
+  () => !props.showTask && inlineActionVisible.value,
+  (hidden) => {
+    if (hidden && barElement.value?.contains(document.activeElement)) {
+      props.actionElement?.focus({ preventScroll: true })
+    }
+  },
+)
 </script>
 
 <template>
-  <section class="mobile-download-bar" aria-label="快捷下载">
+  <section
+    v-show="showTask || !inlineActionVisible"
+    ref="barElement"
+    class="mobile-download-bar"
+    aria-label="快捷下载"
+  >
     <div class="mobile-download-inner">
       <p class="mobile-download-summary">{{ summary }}</p>
       <div class="mobile-download-actions">

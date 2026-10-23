@@ -48,6 +48,12 @@ test('interactive and translucent surfaces do not retain the previous warm palet
   expect(declarations('.download-task.is-failed .task-heading').color).toBe('#983f2d')
 })
 
+test('only the platform support dot uses muted green, leaving its label and other status dots unchanged', () => {
+  expect(declarations('.platform-support > span').background).toBe('#4f8a68')
+  expect(declarations('.platform-support').color).toBe('var(--muted)')
+  expect(declarations('.result-status > span').background).toBe('var(--accent)')
+})
+
 test('browser chrome and startup recovery use the same neutral palette', () => {
   const html = readFileSync(new URL('../frontend/index.html', import.meta.url), 'utf8')
   const favicon = readFileSync(new URL('../frontend/public/favicon.svg', import.meta.url), 'utf8')

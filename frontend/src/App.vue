@@ -76,10 +76,11 @@ const saveMode = ref<'motion' | 'stills'>('motion')
 const inputElement = ref<HTMLTextAreaElement>()
 const editingInput = ref(false)
 const saveOptionsElement = ref<HTMLElement>()
+const primarySaveElement = ref<HTMLElement>()
 const transferElement = ref<HTMLElement>()
 const coverFailed = ref(false)
 const title = computed(() => presentTitle(video.value?.title ?? ''))
-const selectedImage = computed(() => video.value?.images?.[selectedIndex.value])
+
 const imageSaveDisabled = computed(
   () => loading.value || bufferBusy.value || batchDownloading.value || pendingBatch.value,
 )
@@ -212,7 +213,7 @@ function platformName(platform: VideoInfo['platform']) {
 
     <header class="hero">
       <div>
-        <span class="eyebrow">抖音视频 · 图文 · 实况下载</span>
+        <span class="eyebrow">视频 · 图文 · 实况下载</span>
         <h1>留住<span>一闪而过</span>的喜欢。</h1>
       </div>
       <span class="platform-support"><span />当前支持抖音</span>
@@ -294,6 +295,7 @@ function platformName(platform: VideoInfo['platform']) {
         :title="title.text"
         :download-disabled="imageSaveDisabled"
         @save="handleDownloadImage"
+        @save-live="handleDownloadLivePhoto"
       />
       <section v-else class="video-gallery" aria-label="视频封面">
         <div class="gallery-toolbar">
@@ -337,26 +339,16 @@ function platformName(platform: VideoInfo['platform']) {
         <div v-if="title.tags.length" class="work-tags">
           <span v-for="tag in title.tags" :key="tag">{{ tag }}</span>
         </div>
-        <div class="work-meta">
-          <template v-if="video.mediaType === 'image'"
-            ><span><AppIcon name="image" />{{ video.images?.length ?? 0 }} 项内容</span
-            ><span v-if="livePhotoCount"
-              ><AppIcon name="live" />{{ livePhotoCount }} 项带实况</span
-            ></template
-          >
-          <template v-else
-            ><span><AppIcon name="film" />{{ platformName(video.platform) }}视频</span
-            ><span v-if="formatDuration(video.duration)">{{
-              formatDuration(video.duration)
-            }}</span></template
-          >
+        <div v-if="video.mediaType !== 'image'" class="work-meta">
+          <span><AppIcon name="film" />{{ platformName(video.platform) }}视频</span>
+          <span v-if="formatDuration(video.duration)">{{ formatDuration(video.duration) }}</span>
         </div>
         <p v-if="previewing" class="download-tip">画质与资源检查完成后即可下载。</p>
 
         <div
           v-if="video.mediaType === 'image'"
           ref="saveOptionsElement"
-          class="save-options"
+          class="save-options image-save-options"
           tabindex="-1"
         >
           <span class="section-label">{{
@@ -383,6 +375,7 @@ function platformName(platform: VideoInfo['platform']) {
           <p class="format-summary" aria-live="polite">{{ saveSummary || '暂无可下载资源' }}</p>
           <button
             v-if="saveCount"
+            ref="primarySaveElement"
             class="download-button"
             type="button"
             :disabled="imageSaveDisabled"
@@ -398,31 +391,7 @@ function platformName(platform: VideoInfo['platform']) {
                 : '仅保存静态图片，不包含动态部分'
             }}
           </p>
-          <div v-if="selectedImage && (video.images?.length ?? 0) > 1" class="current-save">
-            <span class="section-label">单独保存 · 第 {{ selectedIndex + 1 }} 张</span>
-            <div class="inline-actions">
-              <button
-                v-if="selectedImage.url"
-                type="button"
-                class="text-button"
-                :disabled="imageSaveDisabled"
-                @click="handleDownloadImage(selectedIndex)"
-              >
-                <AppIcon name="image" />{{
-                  selectedImage.watermarkFree ? '无水印原图' : '高清原图'
-                }}
-              </button>
-              <button
-                v-if="selectedImage.livePhotoUrl"
-                type="button"
-                class="text-button"
-                :disabled="imageSaveDisabled"
-                @click="handleDownloadLivePhoto(selectedIndex)"
-              >
-                <AppIcon name="film" />动态视频
-              </button>
-            </div>
-          </div>
+
           <p v-if="imageQualityNotice" class="quality-note" role="status">
             {{ imageQualityNotice }}
           </p>
@@ -432,6 +401,7 @@ function platformName(platform: VideoInfo['platform']) {
           <span class="section-label">保存这份作品</span>
           <button
             v-if="video.videoUrl"
+            ref="primarySaveElement"
             class="download-button"
             type="button"
             :disabled="loading || bufferBusy || videoDownloading"
@@ -746,6 +716,7 @@ function platformName(platform: VideoInfo['platform']) {
       :disabled="mobileAction.disabled"
       :busy="loading || downloadBusy"
       :show-task="mobileShowsTask"
+      :action-element="primarySaveElement"
       @download="mobileAction.run"
       @details="showDownloadDetails"
     />

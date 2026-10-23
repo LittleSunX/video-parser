@@ -119,6 +119,9 @@ p {
   background: var(--accent);
   flex-shrink: 0;
 }
+.platform-support > span {
+  background: #4f8a68;
+}
 .input-row {
   display: flex;
   align-items: center;
@@ -219,7 +222,7 @@ p {
 }
 .result-card {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 330px;
   align-items: start;
   gap: 24px 36px;
   margin-top: 18px;
@@ -289,6 +292,9 @@ p {
   padding: 10px;
   background: var(--page);
   overflow: hidden;
+}
+.image-mat {
+  height: clamp(420px, calc(100dvh - 340px), 600px);
 }
 .video-mat {
   height: clamp(350px, 34vw, 440px);
@@ -377,6 +383,12 @@ p {
 .image-caption .app-icon {
   width: 15px;
   height: 15px;
+}
+.image-save-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 16px;
 }
 .thumbnails {
   display: grid;
@@ -541,6 +553,10 @@ p {
   padding-top: 16px;
   scroll-margin-top: 16px;
 }
+.image-save-options {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+}
 .section-label {
   display: block;
   margin-bottom: 10px;
@@ -606,12 +622,7 @@ p {
   line-height: 1.8;
   overflow-wrap: anywhere;
 }
-.current-save {
-  margin-top: 21px;
-}
-.current-save .section-label {
-  margin-bottom: 4px;
-}
+
 .inline-actions {
   display: flex;
   flex-wrap: wrap;
