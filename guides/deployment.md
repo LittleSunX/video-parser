@@ -147,6 +147,8 @@ npm run release:check -- --frontend https://YOUR_PROJECT.vercel.app --api https:
 
 这条路线需要一台使用 systemd 的 Debian/Ubuntu VPS、一个指向它的域名，以及配置 Nginx 和 HTTPS 的权限。运行 Node API 无需 Cloudflare 账号。
 
+选择中国内地 VPS 时，先完成域名 ICP 备案及接入商要求的接入手续。阿里云等平台会校验备案状态；具体要求见 [VPS 部署前检查](../VPS_DEPLOY.md#1-准备与安全边界)。
+
 ```text
 用户浏览器
 ├─ 打开网页 → https://example.com → Nginx → 前端静态文件
@@ -175,6 +177,8 @@ Node API 监听 `127.0.0.1:8787`。直连成功的媒体下载不经过 Nginx �
 ## 方式三：Cloudflare Worker 后端与 VPS 前端
 
 希望后端使用 Cloudflare、前端放在自己 VPS 上时，选择这套组合。浏览器从 VPS 获取网页，媒体优先直连抖音 CDN，解析和代理下载请求访问 Worker。这既是一套首次部署方案，也支持只迁移已有站点的前端。
+
+静态前端放在中国内地 VPS 时，同样需要先核对域名备案和接入状态；API 部署在 Cloudflare 不会免除前端站点的这项检查，见 [开始前的准备](frontend-only.md#开始前准备工具和两个地址)。
 
 | 部分               | 部署位置          | 访问地址示例                                                    |
 | ------------------ | ----------------- | --------------------------------------------------------------- |

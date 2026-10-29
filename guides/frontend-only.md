@@ -24,6 +24,10 @@
 
 需要 Cloudflare 账号、能用 sudo 登录的 Debian/Ubuntu VPS，以及前端域名。本地安装 Git、符合 [项目要求](../package.json) 的 Node.js / npm、`tar`、`ssh` 和 `scp`。云安全组和 VPS 防火墙允许 80、443，并保留 SSH 入口。
 
+**先确认 VPS 地域和域名备案状态。** 使用中国内地 VPS 提供网站时，应先完成 ICP 备案及服务器接入商要求的接入手续；只托管静态前端、API 使用 Cloudflare Worker，也需要核对这项要求。以阿里云为例，未备案或尚未接入阿里云的域名可能被平台阻断访问，见 [阿里云 ICP 备案说明](https://help.aliyun.com/zh/icp-filing/basic-icp-service/product-overview/what-is-an-icp-filing)。备案资格、域名注册商和服务器要求以接入商当前审核规则为准。
+
+公网返回 `403`、`Non-compliance ICP Filing` 等备案拦截页时，先处理备案或接入状态，再继续验收。Nginx 配置检查、短暂的 HTTP 200 或首次签发证书成功，都不能代替后续的公网访问和证书续期验证。
+
 | 项目            | 本文示例                  | 填写说明                          |
 | --------------- | ------------------------- | --------------------------------- |
 | Worker API 地址 | `https://api.example.com` | Worker 的 HTTPS 基址，不加 `/api` |

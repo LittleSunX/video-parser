@@ -35,6 +35,8 @@ Node 监听 `127.0.0.1:8787`。**部署到 VPS 后仍优先直连媒体 CDN**，
 
 适用基线：使用 systemd 的独立 Debian/Ubuntu VPS，单 Node 进程，同机 Nginx 直接接收公网访问；不包含 Docker、PM2 cluster、CDN 或多层代理。使用有 `sudo` 权限的普通运维账号构建和发布，API 使用单独的无登录用户运行。
 
+购买或使用中国内地 VPS 前，先核对域名备案资格，并完成 ICP 备案及接入商要求的接入手续。阿里云会阻断未备案或尚未接入阿里云的域名；仅托管静态网页也应核对备案要求，见 [官方说明](https://help.aliyun.com/zh/icp-filing/basic-icp-service/product-overview/what-is-an-icp-filing)。若公网返回 `Non-compliance ICP Filing` 等拦截页，应先处理备案状态；放行端口、安装证书和修改 Nginx 不能替代这一步。
+
 上线前必须完成：
 
 1. 自有域名（示例 `example.com`）的 A 记录指向 VPS 公网 IPv4。只有已配置 IPv6 路由、防火墙和 Nginx 监听时才添加 AAAA；错误 AAAA 会影响访问和签发证书。
