@@ -1,0 +1,25 @@
+{
+  "name": "video-parser-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run typecheck && node build.mjs",
+    "dev": "npm run build && node dist/index.mjs",
+    "start": "node dist/index.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@video-parser/backend": "0.1.0",
+    "hono": "4.13.14"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "~5.9.3"
+  },
+  "engines": {
+    "node": "^22.13.0 || >=24.0.0"
+  }
+}

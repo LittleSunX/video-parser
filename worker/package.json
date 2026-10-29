@@ -8,6 +8,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "deploy": "node ../scripts/release-worker.mjs --deploy"
   },
+  "dependencies": {
+    "@video-parser/backend": "0.1.0"
+  },
   "devDependencies": {
     "typescript": "~5.9.3",
     "wrangler": "^4.136.2"

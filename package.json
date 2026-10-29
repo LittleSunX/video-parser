@@ -4,14 +4,21 @@
   "private": true,
   "workspaces": [
     "frontend",
-    "worker"
+    "backend",
+    "worker",
+    "server"
   ],
   "scripts": {
     "test": "vitest run",
     "check:frontend": "npm run typecheck --workspace frontend",
     "dev:frontend": "npm run dev --workspace frontend",
     "dev:worker": "npm run dev --workspace worker",
-    "build": "npm run build --workspace frontend && npm run typecheck --workspace worker",
+    "dev:server": "npm run dev --workspace server",
+    "build:server": "npm run build --workspace server",
+    "start:server": "npm run start --workspace server",
+    "build": "npm run build --workspace frontend && npm run typecheck --workspace backend && npm run typecheck --workspace worker && npm run build:server",
+    "check:worker": "node scripts/check-worker-build.mjs",
+    "check:nginx": "node scripts/check-nginx.mjs",
     "deploy:worker": "node scripts/release-worker.mjs --deploy",
     "release:worker": "node scripts/release-worker.mjs",
     "release:check": "node scripts/check-release.mjs",
@@ -28,7 +35,9 @@
     "@eslint/js": "^10.0.1",
     "eslint": "^10.11.0",
     "eslint-plugin-vue": "^10.11.1",
+    "esbuild": "0.28.2",
     "globals": "^16.5.0",
+    "miniflare": "5.20260921.0-alpha",
     "prettier": "^3.9.9",
     "typescript-eslint": "^8.70.1",
     "vitest": "^5.0.2"

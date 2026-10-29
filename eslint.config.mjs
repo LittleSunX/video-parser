@@ -13,11 +13,11 @@ export default ts.config(
     languageOptions: { globals: globals.browser },
   },
   {
-    files: ['worker/**/*.ts'],
+    files: ['worker/**/*.ts', 'backend/**/*.ts'],
     languageOptions: { globals: globals.worker },
   },
   {
-    files: ['tests/**/*.js', '*.mjs', '*.ts'],
+    files: ['tests/**/*.{js,mjs}', 'scripts/**/*.mjs', 'server/**/*.{ts,mjs}', '*.mjs', '*.ts'],
     languageOptions: { globals: globals.node },
   },
   {
@@ -33,7 +33,7 @@ export default ts.config(
     },
   },
   {
-    files: ['frontend/src/utils/download.ts', 'worker/src/index.ts'],
+    files: ['frontend/src/utils/download.ts', 'backend/src/http/handle-request.ts'],
     // 文件名清理必须匹配不可打印控制字符。
     rules: { 'no-control-regex': 'off' },
   },

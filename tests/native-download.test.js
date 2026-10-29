@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { runInNewContext } from 'node:vm'
 import worker from '../worker/src/index'
 import { triggerDownload } from '../frontend/src/utils/download'
-import { downloadErrorPage } from '../worker/src/utils/download-error-page'
+import { downloadErrorPage } from '../backend/src/utils/download-error-page'
 
 const token = '12345678-1234-1234-1234-123456789abc'
 const media = 'https://v.douyinvod.com/video.mp4'

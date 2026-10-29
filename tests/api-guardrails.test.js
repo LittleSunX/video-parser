@@ -1,8 +1,8 @@
 import { test, afterEach } from 'vitest'
 import assert from 'node:assert/strict'
 import worker from '../worker/src/index'
-import { AppError } from '../worker/src/errors/app-error.ts'
-import { errorResponse } from '../worker/src/utils/error-response.ts'
+import { AppError } from '../backend/src/errors/app-error.ts'
+import { errorResponse } from '../backend/src/utils/error-response.ts'
 import { readVideoResponse } from '../frontend/src/api/response.ts'
 const originalFetch = global.fetch
 afterEach(() => {

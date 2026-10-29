@@ -52,6 +52,8 @@ export async function fetchMedia(
           'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
         Referer: 'https://www.douyin.com/',
         Accept: '*/*',
+        // Node fetch may decode compressed bodies while keeping the encoded length/range.
+        'Accept-Encoding': 'identity',
       }
       if (range) headers.Range = range
       upstream = await fetch(current.toString(), {
@@ -68,6 +70,11 @@ export async function fetchMedia(
       current = new URL(location, current)
     }
     if (!upstream) throw new AppError('DOWNLOAD_FAILED', '媒体资源重定向次数过多', 502)
+    const encoding = upstream.headers.get('Content-Encoding')?.trim().toLowerCase()
+    if ((upstream.ok || upstream.status === 416) && encoding && encoding !== 'identity') {
+      // Do not strip headers and guess: Content-Range also describes encoded bytes.
+      throw new AppError('DOWNLOAD_FAILED', '媒体服务器返回了不支持的传输编码', 502)
+    }
     if (upstream.status === 416) {
       // 保留范围错误及资源长度，避免下载器把续传边界误判成网关故障。
       const headers = new Headers()

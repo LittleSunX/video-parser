@@ -1,13 +1,13 @@
 import { test, expect, afterEach, vi } from 'vitest'
-import { DouyinParser } from '../worker/src/parsers/douyin'
-import { mapItemToVideoInfo } from '../worker/src/parsers/douyin/map-item'
-import { runParseStrategies } from '../worker/src/parsers/douyin/strategies'
+import { DouyinParser } from '../backend/src/parsers/douyin'
+import { mapItemToVideoInfo } from '../backend/src/parsers/douyin/map-item'
+import { runParseStrategies } from '../backend/src/parsers/douyin/strategies'
 import { buildImageFilename } from '../frontend/src/utils/download'
 import { downloadMediaArchive } from '../frontend/src/utils/batch-download'
 import { saveBlob } from '../frontend/src/utils/auto-download'
 import { unzipSync } from 'fflate'
 import worker from '../worker/src/index'
-import { resolveSupportedUrl } from '../worker/src/utils/url'
+import { resolveSupportedUrl } from '../backend/src/utils/url'
 
 vi.mock('../frontend/src/utils/auto-download', async (load) => ({
   ...(await load()),
@@ -208,7 +208,7 @@ test('short-link redirects release unused response bodies', async () => {
 })
 
 test('longer fallback preserves existing live tracks and does not pair unrelated images by position', async () => {
-  const { runParseStrategies } = await import('../worker/src/parsers/douyin/strategies')
+  const { runParseStrategies } = await import('../backend/src/parsers/douyin/strategies')
   const live = [1, 2, 3].map((i) => ({
     url: `https://images/${i}`,
     livePhotoUrl: `https://live/${i}`,
@@ -278,7 +278,7 @@ test('rejecting non-media cancels upstream body and request', async () => {
       headers: { 'Content-Type': 'application/json' },
     })
   }
-  const { fetchMedia } = await import('../worker/src/services/media-download')
+  const { fetchMedia } = await import('../backend/src/services/media-download')
   await expect(
     fetchMedia(new URL('https://v.douyinvod.com/a'), null, new AbortController().signal),
   ).rejects.toMatchObject({ code: 'MEDIA_UNAVAILABLE' })
@@ -287,7 +287,7 @@ test('rejecting non-media cancels upstream body and request', async () => {
 })
 
 test('unrelated image identities are retained instead of paired by array position', async () => {
-  const { runParseStrategies } = await import('../worker/src/parsers/douyin/strategies')
+  const { runParseStrategies } = await import('../backend/src/parsers/douyin/strategies')
   const first = mapItemToVideoInfo(
     {
       images: [
@@ -312,7 +312,7 @@ test('unrelated image identities are retained instead of paired by array positio
 })
 
 test('cross-strategy identity recovers still-only and live-only variants with different URLs', async () => {
-  const { runParseStrategies } = await import('../worker/src/parsers/douyin/strategies')
+  const { runParseStrategies } = await import('../backend/src/parsers/douyin/strategies')
   const first = mapItemToVideoInfo(
     { images: [{ uri: 'one', video: { play_addr: { uri: 'live-one' } } }] },
     url,

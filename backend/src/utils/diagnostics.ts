@@ -3,6 +3,7 @@ import type { VideoInfo } from '../types/video'
 
 export interface VersionMetadata {
   id: string
+  runtime?: 'cloudflare-worker' | 'node'
   tag?: string
   timestamp?: string
 }
@@ -110,6 +111,7 @@ const UPSTREAM_RESULTS = new Set([
 export interface Diagnostics {
   requestId: string
   version: string
+  runtime?: 'cloudflare-worker' | 'node'
   emit(event: string, fields?: DiagnosticFields): void
   serverTiming?(): string
 }
@@ -260,6 +262,7 @@ export function createDiagnostics(metadata?: VersionMetadata): Diagnostics {
   return {
     requestId,
     version,
+    runtime: metadata?.runtime,
     emit(event, fields = {}) {
       event = DIAGNOSTIC_EVENTS.has(event) ? event : 'unknown_event'
       fields = safeFields(fields)
@@ -287,7 +290,9 @@ export function createDiagnostics(metadata?: VersionMetadata): Diagnostics {
         timings.set(metric, fields.durationMs)
       }
       // 仅传入固定事件及计数；禁止记录请求 URL、作品信息和原始异常。
-      console.info(JSON.stringify({ event, requestId, version, ...fields }))
+      console.info(
+        JSON.stringify({ event, requestId, version, runtime: metadata?.runtime, ...fields }),
+      )
     },
     serverTiming() {
       return [...timings].map(([name, duration]) => name + ';dur=' + duration).join(', ')
@@ -299,12 +304,21 @@ export function withDiagnostics(response: Response, trace: Diagnostics): Respons
   const headers = new Headers(response.headers)
   headers.set('X-Request-ID', trace.requestId)
   headers.set('X-Worker-Version', trace.version)
+  headers.set('X-API-Version', trace.version)
+  if (trace.runtime) headers.set('X-API-Runtime', trace.runtime)
   const timing = trace.serverTiming?.()
   if (timing) headers.set('Server-Timing', timing)
   const exposed = headers.get('Access-Control-Expose-Headers')
   headers.set(
     'Access-Control-Expose-Headers',
-    [exposed, 'X-Request-ID', 'X-Worker-Version', timing ? 'Server-Timing' : undefined]
+    [
+      exposed,
+      'X-Request-ID',
+      'X-Worker-Version',
+      'X-API-Version',
+      trace.runtime ? 'X-API-Runtime' : undefined,
+      timing ? 'Server-Timing' : undefined,
+    ]
       .filter(Boolean)
       .join(', '),
   )

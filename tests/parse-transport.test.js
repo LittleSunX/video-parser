@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { parseVideo } from '../frontend/src/api/video'
-import { readParseInput } from '../worker/src/utils/parse-input'
+import { readParseInput } from '../backend/src/utils/parse-input'
 
 const source = '复制分享 + & 中文 https://www.douyin.com/video/123?from=a%2Bb&tag=1'
 const video = {

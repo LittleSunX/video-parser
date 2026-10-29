@@ -1,0 +1,16 @@
+{
+  "name": "@video-parser/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./http": "./src/http/handle-request.ts",
+    "./runtime": "./src/http/runtime.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}

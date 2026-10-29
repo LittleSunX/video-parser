@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { createAttemptScheduler } from '../worker/src/parsers/douyin/attempt-scheduler'
-import { DouyinParser } from '../worker/src/parsers/douyin'
-import { parseVideo } from '../worker/src/services/parse-service'
+import { createAttemptScheduler } from '../backend/src/parsers/douyin/attempt-scheduler'
+import { DouyinParser } from '../backend/src/parsers/douyin'
+import { parseVideo } from '../backend/src/services/parse-service'
 
 const source = 'https://www.douyin.com/video/123'
 const item = {

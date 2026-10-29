@@ -4,11 +4,11 @@ import {
   createDiagnostics,
   createUpstreamAttempt,
   withDiagnostics,
-} from '../worker/src/utils/diagnostics'
-import { runParseStrategies } from '../worker/src/parsers/douyin/strategies'
-import { DouyinParser } from '../worker/src/parsers/douyin'
+} from '../backend/src/utils/diagnostics'
+import { runParseStrategies } from '../backend/src/parsers/douyin/strategies'
+import { DouyinParser } from '../backend/src/parsers/douyin'
 import { parseVideo } from '../frontend/src/api/video'
-import { errorResponse } from '../worker/src/utils/error-response'
+import { errorResponse } from '../backend/src/utils/error-response'
 
 const allowed = { limit: async () => ({ success: true }) }
 const env = {
