@@ -628,6 +628,8 @@ describe('shared core over real Node HTTP with an offline deterministic upstream
     }
   })
 
+  // Windows Node 22 can take over 5s to drain this 1 MiB fixture under CI load.
+  // The first response and every read still have their own 3s progress deadline.
   test('a long real HTTP media stream sends its first bytes before the upstream ends', async () => {
     const completion = deferred()
     const prefix = Buffer.from([0, 128, 255, 1])
@@ -668,7 +670,7 @@ describe('shared core over real Node HTTP with an offline deterministic upstream
       await reader?.cancel().catch(() => {})
       reader?.releaseLock()
     }
-  })
+  }, 15_000)
 
   test('download disconnect closes the real upstream socket and releases global/per-IP capacity', async () => {
     const closed = deferred()
