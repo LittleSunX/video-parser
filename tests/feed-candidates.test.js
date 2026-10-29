@@ -1,12 +1,12 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { createAttemptScheduler } from '../worker/src/parsers/douyin/attempt-scheduler'
+import { createAttemptScheduler } from '../backend/src/parsers/douyin/attempt-scheduler'
 import {
   runOrderedCandidates,
   mergeKnownResults,
-} from '../worker/src/parsers/douyin/ordered-candidates'
-import { extractImageAssets, hasAllImageResources } from '../worker/src/parsers/douyin/images'
-import { runParseStrategies } from '../worker/src/parsers/douyin/strategies'
-import { DouyinParser } from '../worker/src/parsers/douyin'
+} from '../backend/src/parsers/douyin/ordered-candidates'
+import { extractImageAssets, hasAllImageResources } from '../backend/src/parsers/douyin/images'
+import { runParseStrategies } from '../backend/src/parsers/douyin/strategies'
+import { DouyinParser } from '../backend/src/parsers/douyin'
 
 function deferred() {
   let resolve

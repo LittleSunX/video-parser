@@ -131,6 +131,265 @@ test('本地 CLI 端到端核对版本，错配通过非零退出码阻止验收
   )
 })
 
+test.each(['edge', '', null, 17, {}, 'Node'])(
+  'release CLI rejects an explicitly unsupported runtime %j',
+  async (runtime) => {
+    await fixture(
+      (request, response) =>
+        json(
+          response,
+          request.url === '/version.json'
+            ? { commit, builtAt: timestamp }
+            : { ...health, data: { ...health.data, runtime } },
+        ),
+      async (base) => {
+        const result = await runCli('check-release.mjs', [
+          '--frontend',
+          base,
+          '--worker',
+          base,
+          '--commit',
+          commit,
+        ])
+        assert.equal(result.code, 1)
+        assert.equal(JSON.parse(result.stdout).passed, false)
+        assert.match(JSON.parse(result.stdout).failures.join('\n'), /运行时|runtime/)
+      },
+    )
+  },
+)
+
+test.each([undefined, 'cloudflare-worker', 'node'])(
+  'release CLI reports API metadata without removing Worker fields for runtime %s',
+  async (runtime) => {
+    await fixture(
+      (request, response) =>
+        json(
+          response,
+          request.url === '/version.json'
+            ? { commit, builtAt: timestamp }
+            : { ...health, data: { ...health.data, runtime } },
+        ),
+      async (base) => {
+        const result = await runCli('check-release.mjs', [
+          '--frontend',
+          base,
+          '--worker',
+          base,
+          '--commit',
+          commit,
+        ])
+        assert.equal(result.code, 0, result.stderr)
+        assert.deepEqual(JSON.parse(result.stdout), {
+          passed: true,
+          expectedCommit: commit,
+          expectedFrontendCommit: commit,
+          expectedWorkerCommit: commit,
+          expectedApiCommit: commit,
+          frontendCommit: commit,
+          workerVersion: version,
+          workerCommit: commit,
+          apiVersion: version,
+          apiCommit: commit,
+          apiRuntime: runtime ?? 'cloudflare-worker',
+          failures: [],
+        })
+      },
+    )
+  },
+)
+
+test.each([undefined, 'cloudflare-worker', 'node'])(
+  'API CLI aliases check separate frontend and API commits for runtime %s',
+  async (runtime) => {
+    const frontendCommit = 'b'.repeat(40)
+    await fixture(
+      (request, response) =>
+        json(
+          response,
+          request.url === '/version.json'
+            ? { commit: frontendCommit, builtAt: timestamp }
+            : { ...health, data: { ...health.data, runtime } },
+        ),
+      async (base) => {
+        const args = [
+          '--frontend',
+          base,
+          '--api',
+          base,
+          '--frontend-commit',
+          frontendCommit,
+          '--api-commit',
+          commit,
+        ]
+        const matching = await runCli('check-release.mjs', args)
+        assert.equal(matching.code, 0, matching.stderr)
+        const report = JSON.parse(matching.stdout)
+        assert.equal(report.passed, true)
+        assert.equal(report.expectedFrontendCommit, frontendCommit)
+        assert.equal(report.expectedApiCommit, commit)
+        assert.equal(report.expectedWorkerCommit, commit)
+        assert.equal(report.apiCommit, commit)
+        const mismatch = await runCli('check-release.mjs', [...args.slice(0, -1), frontendCommit])
+        assert.equal(mismatch.code, 1)
+        assert.deepEqual(JSON.parse(mismatch.stdout).failures, [
+          `${runtime === 'node' ? 'Node' : 'Worker'} 提交与预期版本不一致`,
+        ])
+      },
+    )
+  },
+)
+
+test.each([
+  ['--api', '/other', /--api.*--worker.*冲突/],
+  ['--api-commit', 'b'.repeat(40), /--api-commit.*--worker-commit.*冲突/],
+])(
+  'CLI rejects conflicting alias values for %s before requesting either service',
+  async (flag, value, error) => {
+    let requests = 0
+    await fixture(
+      (_request, response) => {
+        requests++
+        json(response, health)
+      },
+      async (base) => {
+        for (const extra of [[], ['--dry-run']]) {
+          const result = await runCli('check-release.mjs', [
+            '--frontend',
+            base,
+            '--worker',
+            base,
+            '--frontend-commit',
+            commit,
+            '--worker-commit',
+            commit,
+            flag,
+            flag === '--api' ? base + value : value,
+            ...extra,
+          ])
+          assert.equal(result.code, 1)
+          assert.match(result.stderr, error)
+          assert.equal(result.stdout, '')
+        }
+        assert.equal(requests, 0)
+      },
+    )
+  },
+)
+
+test.each([
+  [['--worker'], ['--worker-commit']],
+  [['--api'], ['--api-commit']],
+  [['--api'], ['--worker-commit']],
+  [['--worker'], ['--api-commit']],
+  [
+    ['--api', '--worker'],
+    ['--api-commit', '--worker-commit'],
+  ],
+])(
+  'dry-run supports mixed or identical aliases %j / %j without networking',
+  async (addresses, commits) => {
+    let requests = 0
+    const frontendCommit = 'b'.repeat(40)
+    await fixture(
+      (_request, response) => {
+        requests++
+        json(response, health)
+      },
+      async (base) => {
+        const result = await runCli('check-release.mjs', [
+          '--frontend',
+          base + '/frontend',
+          ...addresses.flatMap((flag) => [flag, base + '/backend']),
+          '--frontend-commit',
+          frontendCommit,
+          ...commits.flatMap((flag) => [flag, commit]),
+          '--dry-run',
+        ])
+        assert.equal(result.code, 0, result.stderr)
+        assert.deepEqual(JSON.parse(result.stdout), {
+          mode: '仅预览请求，未联网',
+          expectedCommit: frontendCommit,
+          expectedFrontendCommit: frontendCommit,
+          expectedWorkerCommit: commit,
+          expectedApiCommit: commit,
+          requests: [base + '/frontend/version.json', base + '/backend/api/health'],
+        })
+        assert.equal(requests, 0)
+      },
+    )
+  },
+)
+
+test('CLI reports commit alias conflicts even when frontend-commit is missing', async () => {
+  const result = await runCli('check-release.mjs', [
+    '--frontend',
+    'https://frontend.example',
+    '--api',
+    'https://api.example',
+    '--worker-commit',
+    commit,
+    '--api-commit',
+    'b'.repeat(40),
+    '--dry-run',
+  ])
+  assert.equal(result.code, 1)
+  assert.match(result.stderr, /--api-commit.*--worker-commit.*冲突/)
+})
+
+test('release CLI help documents neutral aliases and legacy flags', async () => {
+  const result = await runCli('check-release.mjs', ['--help'])
+  assert.equal(result.code, 0, result.stderr)
+  for (const flag of ['--api', '--api-commit', '--worker', '--worker-commit', '--dry-run'])
+    assert.ok(result.stdout.includes(flag), `Missing help for ${flag}`)
+  assert.match(result.stdout, /Node/)
+  assert.match(result.stdout, /冲突/)
+})
+
+test.each(
+  [undefined, 'cloudflare-worker', 'node'].flatMap((runtime) =>
+    [
+      ['service', 'other-api', /健康接口异常/],
+      ['status', 'error', /健康接口异常/],
+      ['version', undefined, /有效版本 ID/],
+      ['version', 'unknown', /有效版本 ID/],
+      ['versionTag', undefined, /完整提交版本/],
+      ['versionTag', commit.slice(0, 7), /完整提交版本/],
+      ['versionTag', 'b'.repeat(40), /提交与预期版本不一致/],
+      ['versionCreatedAt', undefined, /版本创建时间无效/],
+      ['versionCreatedAt', '2026-02-30T01:00:00.000Z', /版本创建时间无效/],
+    ].map(([field, value, error]) => ({ runtime, field, value, error })),
+  ),
+)(
+  'release CLI preserves strict metadata checks: $runtime / $field=$value',
+  async ({ runtime, field, value, error }) => {
+    await fixture(
+      (request, response) =>
+        json(
+          response,
+          request.url === '/version.json'
+            ? { commit, builtAt: timestamp }
+            : { ...health, data: { ...health.data, runtime, [field]: value } },
+        ),
+      async (base) => {
+        const result = await runCli('check-release.mjs', [
+          '--frontend',
+          base,
+          '--api',
+          base,
+          '--commit',
+          commit,
+        ])
+        assert.equal(result.code, 1)
+        const report = JSON.parse(result.stdout)
+        assert.equal(report.passed, false)
+        assert.equal(report.failures.length, 1)
+        assert.match(report.failures[0], error)
+      },
+    )
+  },
+)
+
 test('本地 CLI 端到端覆盖普通视频、图文、实况和媒体前缀', async () => {
   let parses = 0
   let downloads = 0
@@ -253,7 +512,10 @@ test('separate frontend and Worker commits are checked independently by CLI', as
 test.each([
   ['--frontend-commit', commit],
   ['--worker-commit', commit],
+  ['--api-commit', commit],
   ['--frontend-commit', commit, '--worker-commit', commit, '--commit', commit],
+  ['--frontend-commit', commit, '--api-commit', commit, '--commit', commit],
+  ['--api-commit', commit, '--worker-commit', commit],
 ])('CLI rejects incomplete or conflicting version flags %s', async (...flags) => {
   const result = await runCli('check-release.mjs', [
     '--frontend',

@@ -1,91 +1,50 @@
 <div align="center">
 
-# 🎬 Video Parser
+# Video Parser
 
-**轻量、现代的短视频 / 图文作品解析下载工具**
+粘贴抖音分享链接，在浏览器中保存视频、图集、实况动态与背景音乐。
 
-粘贴抖音分享链接，即可解析视频、图集、Live Photo 实况与背景音乐。  
-无需安装客户端，打开网页即可使用。
+[在线体验](https://wind-video.ccwu.cc/) · [快速开始](#本地运行) · [部署指南](#部署) · [问题反馈](https://github.com/LittleSunX/video-parser/issues)
 
-<p>
-  <a href="https://wind-video.ccwu.cc/"><strong>🌐 在线体验</strong></a>
-  ·
-  <a href="https://api.wind-video.ccwu.cc/api/health">API 状态</a>
-  ·
-  <a href="RELEASE_CHECK.md">检查线上部署版本</a>
-</p>
-
-<p>
-  <img src="https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white" alt="Vue 3" />
-  <img src="https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white" alt="Vite" />
-  <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white" alt="Cloudflare Workers" />
-  <img src="https://img.shields.io/badge/Vercel-Frontend-000000?logo=vercel&logoColor=white" alt="Vercel" />
-</p>
+[![Quality checks](https://github.com/LittleSunX/video-parser/actions/workflows/check.yml/badge.svg)](https://github.com/LittleSunX/video-parser/actions/workflows/check.yml)
+![Vue 3](https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
 
 </div>
 
----
+## 简介
 
-## ✨ 项目亮点
+Video Parser 是一个支持自行部署的网页下载工具。前端使用 Vue 3，后端可选择 Cloudflare Workers 或独立 Node 服务，两者共用解析和下载逻辑。
 
-| 能力              | 说明                                                      |
-| ----------------- | --------------------------------------------------------- |
-| 🎞️ **视频解析**   | 解析公开抖音作品，自动选择更高质量的视频流                |
-| 🖼️ **图文解析**   | 支持普通图集、Slides、高清图片资源                        |
-| 🌄 **Live Photo** | 识别实况动态轨，可分别下载静态图与 MP4                    |
-| 🎵 **背景音乐**   | 上游返回音乐资源时可单独下载                              |
-| ⚡ **双通道下载** | 优先浏览器直链下载，失败后自动切换 Worker 代理            |
-| 🏷️ **友好文件名** | 自动生成“平台_作者_标题_作品ID”格式文件名                 |
-| 🛡️ **接口保护**   | HTTPS 校验、媒体域名白名单、请求大小限制、Cloudflare 限流 |
-| 📱 **响应式页面** | PC 和手机均可使用，支持下载进度、取消、批量下载           |
+**目前支持抖音公开作品。** 可粘贴单独链接或完整分享文案；页面提供静态预览，方便确认内容后保存。
 
-> 当前正式支持 **抖音**。快手、小红书、TikTok 等平台已预留 Parser 扩展结构，但暂未开放。
+| 内容       | 支持能力                                               |
+| ---------- | ------------------------------------------------------ |
+| 视频       | 选择较高画质的视频流，保存视频与封面                   |
+| 图文       | 大图、缩略图和总览查看，单张保存或 ZIP 批量下载        |
+| Live Photo | 分别保存静态图片和 MP4 动态轨，批量下载可选动态优先    |
+| 背景音乐   | 上游提供资源时，可单独保存                             |
+| 下载操作   | 进度、取消、失败重试与再次保存，保留直链和备用下载入口 |
 
----
+图片是否无水印、音乐与实况是否可用，取决于上游实际返回的资源。Live Photo 保存为图片或 MP4，不会自动组合成手机相册中的实况照片。
 
-## 🌐 在线体验
+**下载默认优先直连抖音媒体 CDN**，直连成功时文件不经过本项目的 API。直连异常按资源类型回退到备用下载；已知超过 64 MiB 的普通视频会直接使用 API 流式代理，手动选择“备用下载”也会经过 API。具体规则见 [下载策略](guides/implementation.md#下载策略)。
 
-👉 **[https://wind-video.ccwu.cc/](https://wind-video.ccwu.cc/)**
+## 使用
 
-Demo API：
+1. 在抖音中复制作品分享链接或分享文案。
+2. 打开 [在线体验](https://wind-video.ccwu.cc/)，粘贴后开始解析。
+3. 确认预览内容，选择视频、图片、动态轨或音乐进行保存。
 
-```text
-https://api.wind-video.ccwu.cc
-```
+批量下载会生成 ZIP，每包媒体内容最多 32 MiB；较大的作品按页面提示逐包保存。浏览器接管下载后，请到下载列表确认结果。
 
-Demo API 健康检查：
+<a id="quick-start"></a>
 
-```text
-https://api.wind-video.ccwu.cc/api/health
-```
+## 本地运行
 
----
+需要 Git、npm，以及 **Node.js 22.13.0 及以上的 22.x，或 24 及以上版本**，具体范围见 [package.json](package.json)。仓库的 [.nvmrc](.nvmrc) 使用 Node 22。
 
-## 📦 支持内容
-
-| 内容类型        | 解析 | 下载 | 备注                           |
-| :-------------- | :--: | :--: | ------------------------------ |
-| 普通视频        |  ✅  |  ✅  | 自动选择较高画质流             |
-| 视频封面        |  ✅  |  ✅  | 支持独立下载                   |
-| 普通图集        |  ✅  |  ✅  | 支持单张 / 批量下载            |
-| 无水印原图      |  ✅  |  ✅  | 仅明确命中可信无水印字段时标记 |
-| Live Photo      |  ✅  |  ✅  | 静态图 + MP4 动态轨            |
-| 背景音乐        |  ✅  |  ✅  | 视作品返回数据而定             |
-| 私密 / 权限作品 |  ❌  |  ❌  | 不绕过平台访问控制             |
-
----
-
-## 🚀 快速开始
-
-### 环境要求
-
-```text
-Node.js 22.13+（22.x）或 24+，具体范围见 package.json 的 engines
-建议使用 .nvmrc 对应的版本
-```
-
-### 安装依赖
+### 1. 安装依赖
 
 ```bash
 git clone https://github.com/LittleSunX/video-parser.git
@@ -93,588 +52,136 @@ cd video-parser
 npm ci
 ```
 
-### 启动后端
+### 2. 启动 API
+
+本地可直接使用 Node，无需配置 Cloudflare 账号：
+
+```bash
+npm run dev:server
+```
+
+API 默认监听 `http://127.0.0.1:8787`，可通过 [/api/health](http://127.0.0.1:8787/api/health) 检查。该命令先构建再启动，修改后端代码后需要重启。
+
+<details>
+<summary>使用 Cloudflare Worker 开发入口</summary>
+
+如果需要调试 Worker 环境，改用：
 
 ```bash
 npm run dev:worker
 ```
 
-默认地址：
+两个后端入口默认都使用 8787 端口，选择一个启动即可。
 
-```text
-http://127.0.0.1:8787
-```
+</details>
 
-### 启动前端
+### 3. 启动前端
 
-另开一个终端：
+另开终端，进入同一仓库目录：
 
 ```bash
 npm run dev:frontend
 ```
 
-默认地址：
+打开终端显示的地址，默认是 [http://localhost:5173](http://localhost:5173)。Vite 会将 `/api` 请求转发到本地 8787 端口，默认无需配置环境变量。
 
-```text
-http://127.0.0.1:5173
-```
+<a id="deployment"></a>
 
-本地开发时 Vite 会自动将 `/api` 代理到本地 Worker。
+## 部署
 
----
+首次部署推荐从方式一开始：前端和 API 都由平台托管，无需购买或维护 VPS。其他两种方式按需选择，分别有完整教程。
 
-## 🧠 工作原理
+三种方案均保留上述优先直连策略。API 部署在 Worker 还是 Node，决定解析和代理下载由谁处理；前端托管位置不会让所有媒体下载都经过该服务器。
 
-```mermaid
-flowchart LR
-    A["用户粘贴分享链接"] --> B["展开短链 / 提取作品 ID"]
-    B --> C["Cloudflare Worker"]
-    C --> D["Web Detail"]
-    C --> E["Mobile Feed"]
-    C --> F["Mobile SSR"]
-    C --> G["Page Meta"]
-    D --> H["统一作品数据"]
-    E --> H
-    F --> H
-    G --> H
-    H --> I["视频 / 图集 / Live Photo / 音乐"]
-    I --> J["浏览器直链下载"]
-    I --> K["Worker 备用下载"]
-```
+### 方式一：无需维护服务器（推荐）
 
-解析器不会盲目使用返回列表中的第一条作品，而是严格校验目标作品 ID，避免误解析到推荐视频。
+**Vercel 托管前端，Cloudflare Worker 运行 API。** 准备好 GitHub、Vercel 和 Cloudflare 账号后，按“准备代码 → 发布 API → 发布前端 → 验证”的顺序操作，可以先使用平台提供的域名。
 
-对于图文作品，会按图片标识或相同资源地址合并不同接口、不同列表中的资源，不按数组下标配对：
+**[开始部署：Vercel + Cloudflare Worker →](guides/deployment.md#方式一无需维护服务器推荐)**
 
-- 合并重复图片，保留已发现的 Live Photo 动态轨。
-- 同一图片优先保留明确来自可信无水印字段的地址。
-- 采用更完整图片列表的顺序，同时保留其他已识别资源。
-- 只有动态轨、缺少静态图片或已知资源不完整时，继续尝试备用解析策略。
+### 方式二：前端和 API 全部部署到 VPS
 
-主策略优先执行，慢请求等待 600 ms 后可启动备用策略；某次尝试失败时，尚未运行的策略优先获得机会，再继续原策略的重试。最多同时进行两个上游尝试，配额覆盖等待响应、读体和资源提取，排队不占单次请求超时。解析达到总时间预算或策略耗尽时，有可用图文资源则返回已有结果，因此无法保证上游缺失的资源一定能补齐。背景音乐在上游提供时随作品返回。
+适合已有 VPS、希望自行管理服务的用户。Nginx 提供网页和 HTTPS，Node 运行 API，需要自行维护服务器、证书和服务进程。
 
-Mobile Feed 在所有策略已启动、没有更高优先级请求排队且有空闲配额时，可提前尝试相邻的一个备用节点。结果仍按原节点顺序裁决，并保留已返回的更好图片及实况资源；成功路径最多额外启动一个相邻请求，全部失败时仍只尝试原来的四个节点。
+**[开始部署：Nginx + Node →](VPS_DEPLOY.md)**
 
-跨策略合并会保留已有作者、封面和音乐，并补充缺失字段；音乐地址与标题配对处理，避免将不同音乐混在一起。图片及已声明的实况资源是否已获取，与是否确认无水印分别判定：已获取全部已识别资源、但无水印状态未确认时，页面提示“图片已获取，无水印状态未确认”；资源完整性未确认时才显示补齐警告，可下载已有资源或点击重新解析。备用策略仍会继续寻找更好的图片资源。
+### 方式三：Cloudflare Worker 后端与 VPS 前端
 
-核心解析逻辑位于：
+解析和备用下载运行在 Cloudflare Worker，网页由 VPS 上的 Nginx 提供。教程从首次部署 Worker 开始；已有可用 Worker、仅迁移前端时可跳过后端发布。
 
-```text
-worker/src/parsers/douyin.ts
-```
+**[开始部署：CF 后端 + VPS 前端 →](guides/frontend-only.md)**
 
----
+Cloudflare Pages、前后端分开托管等选择放在 [其他部署组合](guides/deployment.md#其他部署组合)，环境变量、排错和 Cloudflare 代理说明放在部署指南末尾。
 
-## ⚡ 下载策略
+## 文档
 
-### 视频
+| 文档                                          | 内容                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------ |
+| [部署指南](guides/deployment.md)              | Worker、Vercel、Pages、静态 VPS、Cloudflare 代理及环境变量         |
+| [VPS 部署](VPS_DEPLOY.md)                     | Node、Nginx、HTTPS、systemd、更新与回滚                            |
+| [CF 后端 + VPS 前端](guides/frontend-only.md) | 首次部署 Worker、构建上传前端、Nginx / HTTPS；兼顾仅迁移前端与回滚 |
+| [API 说明](guides/api.md)                     | 解析、渐进结果、下载、健康检查与限流                               |
+| [实现与开发说明](guides/implementation.md)    | 解析策略、资源合并、下载与 ZIP 分包、诊断和验收                    |
+| [部署版本检查](RELEASE_CHECK.md)              | 检查线上版本、分别指定前后端提交                                   |
 
-默认优先直接从媒体 CDN 下载：
+## 开发
 
-```text
-浏览器 → 抖音媒体 CDN
-```
-
-优点：
-
-- 少经过一层服务器
-- 下载速度通常更快
-- 不消耗 Worker 的大文件转发流量
-- 页面可显示实时下载进度
-
-当出现 CORS、超时或文件过大等情况时，会自动切换到：
-
-```text
-浏览器 → Cloudflare Worker → 抖音媒体 CDN
-```
-
-Worker 通过 `Content-Disposition` 提供建议文件名，实际保存名称和操作取决于浏览器。切换备用下载后，请到浏览器下载列表查看进度。
-
-单项代理下载通过独立下载框架发起，保持主页面打开。Worker 在媒体响应开始前返回的失效、限流等错误会回传到页面，并附上请求编号；资源失效时提供重新解析入口。普通 API 调用仍返回 JSON 错误，成功的媒体仍流式传输，不新增预检请求或整文件缓存。浏览器自身拦截、Worker 之外的网络/边缘错误及传输开始后的失败，仍需查看下载列表；页面的“已发起下载”不代表保存成功。
-
-前端直链下载当前限制：
-
-```text
-最大缓冲：64 MiB
-等待响应：8 秒
-读取停滞：15 秒
-总时长：持续收到数据时不限制
-```
-
-**64 MiB 是普通视频自动下载时的浏览器缓冲阈值，不是视频最大下载容量。** 解析结果提供所选视频流的有效文件大小时，已知超过阈值的视频直接交给 Worker 流式代理下载，避免先接收一部分再重下；不额外发起 HEAD 或探测请求。大小缺失时仍尝试直连，实际接收过程中继续执行上限保护。代理不设置此文件大小上限，但仍受网络、上游和运行环境约束。
-
-单个实况 MP4 与普通视频共用直连优先的下载流程，显示接收进度并支持取消、30 秒内再次保存。直连失败或超过 64 MiB 浏览器缓冲阈值时，回退到 Worker 流式下载；多项实况仍按现有 ZIP 分包流程处理。
-
-同时保留 **打开直链** 和 **备用下载**，方便不同浏览器 / 网络环境下手动选择。
-
-视频、单张图片、音乐、封面和当前 ZIP 接收完成后，在当前页面暂留文件 30 秒；自动保存被浏览器拦截时，可点击“再次保存”复用同一 Blob 与对象地址，不重新 GET 或打包。首次发起保存失败时也可重试保存。再次保存由按钮点击同步触发；页面只能确认已交给浏览器，不能确认文件已落盘。该暂存只服务当前下载任务，不缓存作品解析结果。
-
-页面同一时间只允许一个缓冲任务，开始另一任务先释放上一任务的保存暂存；重新解析、清空、取消、离开页面和到期时也释放引用。按源文件与输出文件预约的页面预算为 128 MiB，单文件接收上限仍为 64 MiB；浏览器复制、解码、下载管理器及垃圾回收行为不在此计数中，因此这不是物理内存硬上限。
-
-背景音乐、封面和单张图片优先从媒体 CDN 直连读取，等待响应最多 8 秒、读取停滞最多 15 秒；跨域读取失败、连接异常或资源不可读时回退一次 Worker 代理。切换时清空前一次下载进度，取消、服务繁忙或文件过大时直接结束任务。代理回退均在客户端设置 30 秒响应等待、45 秒读取停滞保护，给 Worker 的上游超时留出传输余量。持续收到数据时不限制总下载时长，保留进度、取消和再次保存。
-
-### 图文 / Live Photo
-
-图文支持：
-
-- 下载单张图片
-- 下载全部图片
-- 优先下载 Live Photo 动态轨
-- 单独下载静态原图
-- 显示逐项状态，失败后只重试未完成项
-- 取消、重新解析或离开页面时释放缓存
-
-“下载全部”采用动态优先模式：每项有实况视频时下载 MP4，否则下载静态图片。“下载全部原图”只收集可用静态图片。例如，包含 3 个实况资源的作品，动态优先包通常含 3 个 MP4，原图包含 3 张图片；不会在同一个操作中自动把两者都收集进去。Live Photo 下载为独立静态图或 MP4，不会自动生成手机相册中的实况照片。
-
-批量图片在响应头提供有效大小、当前图片不超过本包剩余容量的一半时，最多同时获取两张，并按原顺序打包。两张图片共用本包剩余字节预算；未知大小的当前图片和实况视频保持串行，不另发探测请求。当前项失败时取消预取，已按顺序完成的文件仍保留供重试；超出剩余容量的文件留到下一包重新获取。
-
-批量下载使用 ZIP 保存，每包媒体内容最多 **32 MiB**（ZIP 元数据会有少量额外开销），所有设备采用同一较小分包，减少手机同时持有源文件和 ZIP 的压力。小作品完成后自动请求保存；超过单包容量时，页面提供“保存第 N 包”和“继续准备下一包”，由用户逐包点击，避免浏览器拦截连续下载。单个文件超过 32 MiB 时请使用单项下载入口。
-
-打包以 256 KiB 分块读取 Blob，不再创建整包 Uint8Array。页面每次只准备一个包，失败时保留本包已获取文件；包保存后释放源文件，短暂保留当前 ZIP 供再次保存，准备下一包时释放上一包的保存引用。失败暂存或尚未保存的包 30 秒到期后需重新准备；已保存包的进度仍可继续。最终 ZIP 和浏览器保存过程仍占用内存，不等于零内存下载。上游不提供文件长度时，跨包边界的未完成文件可能需要在下一包重新获取。
-
-批量媒体直链获取保留响应及读取超时，不设持续传输的总时长限制。ZIP 代理回退在客户端设置 30 秒响应等待、45 秒读取停滞保护，覆盖浏览器到 Worker 的连接，同时给 Worker 的上游超时留出传输余量；失败后保留本包已完成文件，可只重试未完成项。Worker 对上游等待响应头最多 15 秒（重定向共用），每次读取停滞最多 30 秒；支持取消传递，保留 Range 流式下载。上游返回 HTTP 416 时保留范围错误及相关长度信息，供浏览器处理续传边界。传输开始后的异常会终止响应流，无法再改成 JSON 错误响应。
-
-代理根据响应 `Content-Type` 拒绝明确的 HTML、JSON 等非媒体内容，避免将错误页面保存成视频。缺少类型或声明为 `application/octet-stream` 的响应仍可透传；该检查不等于对文件内容做完整识别。
-
----
-
-## 🖼️ 图片与无水印策略
-
-抖音不同接口返回的图片字段并不完全一致，因此项目不会简单把所有 `url_list` 都标记为“无水印”。
-
-当前优先级大致为：
-
-```text
-watermark_free_download_url_list
-        ↓
-origin_image
-        ↓
-display_image
-        ↓
-普通 url_list
-        ↓
-download_url / download_addr
-```
-
-只有明确来自高可信无水印字段的资源，前端才会显示：
-
-```text
-下载无水印原图
-```
-
-其他资源会显示：
-
-```text
-下载高清原图
-```
-
-避免把普通 CDN 地址错误标记成无水印。
-
-单张图片、封面及 ZIP 中的图片，会根据已识别的响应 MIME 修正为 JPG、PNG、WebP 等后缀，不进行图片转码。缺少 MIME、通用二进制类型或未识别的图片类型会保留原建议文件名，不能仅凭后缀判断实际格式。
-
----
-
-## 🏗️ 技术架构
-
-```mermaid
-flowchart TB
-    U["Browser"] --> V["Vercel · Vue 3 Frontend"]
-    V --> W["Cloudflare Workers API"]
-    W --> D["Douyin Pages / APIs"]
-    V --> CDN["Media CDN · Direct Download"]
-    W --> CDN
-```
-
-### 前端
-
-- Vue 3
-- Vite
-- TypeScript
-- 原生 CSS
-
-页面采用暖调编辑风格，图文支持大图、缩略图、总览与放大查看。视频仅显示封面，实况仅显示静态图片，不加载播放器；页面聚焦内容确认与下载。图文可切换动态优先与仅保存原图，下载继续使用原有的进度、取消、再次保存和 ZIP 分包流程。
-
-页面布局位于 `frontend/src/App.vue`，静态图文预览位于 `frontend/src/components/ImageGallery.vue`，下载反馈统一使用 `frontend/src/components/DownloadTask.vue`，文件明细默认收起。
-
-### 后端
-
-- Cloudflare Workers
-- TypeScript
-- Fetch API
-- Cloudflare Rate Limiting
-
-### 工程
-
-- npm workspaces
-- Vitest 回归测试
-- Wrangler
-
----
-
-## 🔌 API
-
-### 解析作品
-
-```http
-POST /api/parse
-Content-Type: application/json
-```
-
-请求：
-
-```json
-{
-  "url": "https://v.douyin.com/xxxx/"
-}
-```
-
-也可以直接传完整的抖音分享文案。
-
-同时支持 `application/x-www-form-urlencoded`，字段仍为 `url`。网页使用 `URLSearchParams` 提交分享文案，首次跨域解析即可直接 POST，减少一次 OPTIONS 预检；不缓存作品或媒体地址，不改变解析策略、画质、资源数量及作者、封面、音乐等返回信息。
-
-```http
-POST /api/parse
-Content-Type: application/x-www-form-urlencoded;charset=UTF-8
-
-url=https%3A%2F%2Fv.douyin.com%2Fxxxx%2F
-```
-
-两种格式均受 32 KiB 请求体和 5000 字符输入限制，继续执行域名校验与解析限流。表单只接受一个 `url` 字段；字节限制按编码后的请求体计算。网页在表单编码超过请求体上限时直接使用 JSON，避免缩小原有长文案的可提交范围。
-
-发布时先更新 Worker，再更新前端。旧 JSON 调用保持兼容；新前端连接旧 Worker 收到 HTTP 415 时，仅回退一次 JSON 请求，其他错误不自动重复解析。只有前后端都更新后，普通分享文案的首次解析才能省掉预检。
-
-网页同时通过 `Accept: application/x-ndjson` 请求渐进结果。这个请求头仍满足简单跨域请求条件，同一次 POST 先返回 `{"type":"preview","data":...}`，选优完成后返回 `{"type":"result","data":...}`；流中失败返回 `{"type":"error","error":...}`。候选内容可提前显示，下载入口在最终结果到达前锁定；流中断、取消或没有最终事件时不会把候选结果当成成功。旧 Worker 返回 JSON 时无需重发请求；未请求此格式的 API 调用仍返回原 JSON。
-
-渐进显示改善的是首次看到内容的等待，最终可下载时间仍包括资源完整性和画质补强。重试列表、画质选择和已知实况资源保留规则不因此缩减。取消或关闭响应流会取消同一解析任务。
-
-前端配置跨域 HTTPS API 时，页面打开即添加一个 `preconnect` 提示，利用用户粘贴文案前的时间提前建立连接，不提前调用解析接口。浏览器可选择忽略提示，实际收益取决于网络和浏览器；同源 API 不添加该提示。
-
-首页 HTML 自带加载提示与手动刷新入口，不依赖应用脚本或样式先下载完成。等待 8 秒后只提示资源仍在加载；实际加载或启动失败时才提示失败，不自动刷新或重新发起解析。
-
-解析失败后可点击“重试解析”，使用当前输入重新请求；不会自动重复请求。也可主动点击“复制问题信息”，复制固定错误类别、阶段、耗时及可用的 HTTP 状态、请求编号和版本信息。该报告不含分享文案、作品信息、媒体地址或原始异常；只保留当前失败，重新解析、清空、取消或离开页面时丢弃，不自动上报。
-
-视频响应示例：
-
-```json
-{
-  "success": true,
-  "data": {
-    "platform": "douyin",
-    "mediaType": "video",
-    "videoId": "1234567890",
-    "sourceUrl": "https://...",
-    "title": "作品标题",
-    "author": "作者昵称",
-    "cover": "https://...",
-    "duration": 12345,
-    "videoUrl": "https://..."
-  }
-}
-```
-
-> `duration` 单位统一为 **毫秒**。
-
-解析成功的数据还包含 `parseStatus` 和 `parseReason`：正常满足策略条件时为 `complete` / `complete`；超时或策略耗尽返回已有资源时为 `unverified` / `timeout` 或 `unverified` / `exhausted`。`unverified` 不表示已经证明缺项，`complete` 也不是对上游完整性的独立证明。前端兼容不提供这些字段的旧后端；要显示新提示，需部署更新后的前后端。
-
-图文结果另有 `imagesComplete`，表示解析来源列出的图片及已声明实况资源是否已获取，与各图片的 `watermarkFree` 独立。完整来源必须覆盖合并后的列表才可确认；新增资源或明确缺项会撤销确认。此字段不保证上游未提供的资源也已获取。前端在 `imagesComplete: true` 时不再把策略耗尽或超时误提示为缺图；没有此字段的旧后端仍使用原有完整性提示。
-
-图文 / Live Photo 会返回：
-
-```json
-{
-  "mediaType": "image",
-  "images": [
-    {
-      "url": "https://...",
-      "livePhotoUrl": "https://...",
-      "watermarkFree": true
-    }
-  ],
-  "musicUrl": "https://...",
-  "musicTitle": "背景音乐"
-}
-```
-
-### 备用下载
-
-```http
-GET /api/download?url=<MEDIA_URL>&filename=<FILE_NAME>
-```
-
-主要用于：
-
-- 直链视频下载失败后的兜底
-- 图片
-- Live Photo
-- 封面
-- 背景音乐
-- 需要自定义文件名的资源
-
-### 健康检查
-
-```http
-GET /api/health
-```
-
-```json
-{
-  "success": true,
-  "data": {
-    "service": "video-parser-api",
-    "status": "ok"
-  }
-}
-```
-
----
-
-## 🛡️ 安全与限流
-
-当前 Worker 使用 Cloudflare 原生 Rate Limiting：
-
-| 接口                | 限制         |
-| ------------------- | ------------ |
-| `POST /api/parse`   | 60 秒 10 次  |
-| `GET /api/download` | 60 秒 120 次 |
-
-其他保护：
-
-- 仅接受 HTTPS 资源
-- 拒绝 URL 用户名 / 密码
-- 拒绝非 443 自定义端口
-- 媒体下载域名白名单
-- JSON 请求体最大 32 KiB
-- 分享文案最大 5000 字符
-- 下载 URL 最大 8192 字符
-- Worker 解析总预算约 30 秒
-- 前端等待上限 35 秒
-- 支持主动取消解析
-- 超限返回 HTTP 429
-
-健康检查和 OPTIONS 请求不占用业务限流额度。
-
----
-
-## 🧪 开发与质量检查
-
-提交或部署前，在仓库根目录执行：
+在仓库根目录执行完整检查：
 
 ```bash
-npm ci
 npm run check
 ```
 
-需要单独检查时可运行 `npm test`、`npm run lint`、`npm run check:frontend` 或 `npm run build`；完整验证以 `npm run check` 为准。
+该命令包含格式检查、ESLint、测试、类型检查和构建。常用命令：
 
-`check` 依次执行 Prettier 格式检查、ESLint、Vitest 回归测试、Vue 模板/脚本类型检查、前端构建及 Worker 类型检查。提交前可运行 `npm run format` 修正格式。仓库通过 `.gitattributes` 和 `.editorconfig` 统一使用 LF，避免 Windows/WSL 换行差异。
-
-前端使用 `vue-tsc`，开发期 TypeScript 固定在 5.9 系列以匹配其编译器接口；不再使用临时生成组件脚本的检查方式。回归测试直接使用 Vitest 模块替身和 Vue effect scope，不再手工加载或编译组件。
-
-- `frontend/src/composables/useVideoPage.ts`：解析请求及取消状态。
-- `frontend/src/composables/useMediaDownloads.ts`：视频、图片及批量下载生命周期。
-- `frontend/src/composables/useNotice.ts`：通知及定时器清理。
-- `worker/src/parsers/douyin.ts`：请求策略与兜底顺序。
-- `worker/src/parsers/douyin/`：页面提取、作品匹配、媒体选择和结果映射。
-- `shared/media.ts`：前后端共用图片 MIME 与下载后缀处理。
-- `shared/video.ts`：前后端共用 API 类型，图文完整性通过可选 `imagesComplete` 与无水印确认分别表达。
-
-GitHub Actions 会在 main 推送和 Pull Request 时，分别在 Windows 与 Linux 上从锁文件安装依赖并执行 `npm run check`。配置不会自动发布前后端。
-
-开发依赖中的 Miniflare 暂时固定使用已修补的 `undici@7.29.1`，通过根目录 `overrides` 管理；上游更新后可复核并移除此覆盖。
-
----
-
-## 🔎 版本与稳定性验收
-
-前端构建后可访问 `/version.json` 查看提交号和构建时间；后端 `/api/health` 返回 Cloudflare 部署版本。API 响应包含 `X-Request-ID` 和 `X-Worker-Version`，解析失败提示会附带可用的请求编号，便于关联策略耗时与资源数量日志。
-
-响应还通过 `Server-Timing` 提供在响应头发送前已完成的固定 `worker`、`resolve`、`primary` 耗时（毫秒），不包含作品信息或媒体地址。普通 JSON 的 `worker` 包含内部各阶段，不能与另外两项再次相加；渐进解析及下载的 `worker` 仅表示响应准备耗时。渐进解析的最终等待通过 `parse_stream_complete` 和 `parse_selection` 日志测量，不能用响应头到达时间替代。开发模式前端分别输出响应头到达与最终结果耗时。
-
-每次现有上游请求记录一条 `upstream_attempt`，分开测量响应等待、读体和提取耗时，并记录固定接口类别、尝试次数、HTTP 状态和结果类别。`parse_first_usable` 与 `parse_selection` 分别记录首次可用内容和最终选优时间，以及图片、动态轨、无水印确认数量和作者、封面、音乐是否存在。日志字段与类别经过白名单过滤，不包含分享文案、作品标题、媒体地址或原始异常；诊断不额外调用上游接口。
-
-下载响应成功不代表手机已经保存，真实保存行为需单独验收。
-
-发布工具采用当前完整 Git SHA 给 Worker 标记版本；实际发布要求工作区已提交。`npm run release:worker` 只预览命令，`npm run release:worker -- --dry-run` 仅在本地打包，`npm run deploy:worker` 使用既有 Wrangler 登录或环境凭据发布。根目录与 Worker workspace 的部署入口都使用同一版本检查。
-
-合并、通过 `npm run check` 后，先发布 Worker，再从同一个提交发布前端，随后核对两个服务。
-
-👉 **[检查线上部署版本](RELEASE_CHECK.md)**：包含对照主干最新提交的可复制命令、结果解读，以及前后端分别发布时的检查方式。
-
-本次文件大小提示是新增的可选字段：新前端兼容未提供大小的旧 Worker；要启用已知大视频提前交给浏览器的优化，需要同时更新 Worker。
-
-复制 `scripts/acceptance-samples.example.json` 到本地目录或已忽略的 `docs/`，填写不同普通视频、图文和实况的真实分享文案、预期数量、作品 ID，以及需保留的元信息与无水印数量下限。真实清单无需提交。发布后执行：
-
-```bash
-npm run release:acceptance -- --worker https://your-worker-domain.example --samples <本地样本清单.json>
-```
-
-验收顺序解析三类样本，核对版本、元信息、图片及动态轨数量，并通过下载代理读取代表媒体的 1 KiB 前缀后取消响应；上游忽略 Range 时会报告实际接收的数据块大小，不下载整文件。响应有字节限制及请求/整体期限，遇到限流停止后续样本。`--dry-run` 只检查清单且不联网，`--parse-only` 只执行接口解析。这些检查不代表画面观感、实际整文件保存或手机真机验收。
-
-部署位置变更应使用同版本、独立限流 namespace、无生产路由的隔离 Worker 对照，再决定是否采用；只凭本机耗时不修改生产位置。真机验收应分别在 iPhone Safari、Android 浏览器及应用内浏览器确认普通视频、图片/ZIP、音乐/封面的保存、再次保存、取消及分包操作。
-
----
-
-## ☁️ 部署
-
-推荐部署架构：
-
-```text
-https://your-frontend-domain.example
-               │
-               ▼
-             Vercel
-               │
-               ▼
-https://your-worker-domain.example
-               │
-               ▼
-      Cloudflare Workers
-```
-
-> 上面的域名仅为示例，请替换为你自己的前端域名和 Worker 域名。
-
-### Cloudflare Worker
-
-首次登录：
-
-```bash
-npx wrangler login
-```
-
-部署 / 更新：
-
-```bash
-npm run deploy:worker
-```
-
-Worker：
-
-```text
-video-parser-api
-```
-
-默认 Worker 地址格式：
-
-```text
-https://<worker-name>.<your-subdomain>.workers.dev
-```
-
-如需自定义域名，可在 Cloudflare Workers 中绑定，例如：
-
-```text
-https://api.example.com
-```
-
-重新部署 Worker 不需要重新绑定已经配置好的自定义域名。
-
-### Vercel
-
-推荐配置：
-
-| 配置项           | 值              |
-| ---------------- | --------------- |
-| Root Directory   | `frontend`      |
-| Framework Preset | `Vite`          |
-| Build Command    | `npm run build` |
-| Output Directory | `dist`          |
-
-环境变量：
-
-```env
-VITE_API_BASE_URL=https://your-worker-domain.example
-```
-
-修改 `VITE_*` 环境变量后需要重新部署，因为 Vite 会在构建阶段写入这些值。
-
----
-
-<details>
-<summary><strong>📁 项目结构</strong></summary>
+| 命令                   | 用途                                                                      |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `npm test`             | 运行测试                                                                  |
+| `npm run format`       | 格式化代码和文档                                                          |
+| `npm run build`        | 构建前端、检查共用核心和 Worker 类型、构建 Node 服务                      |
+| `npm run check:worker` | 检查 Worker 打包边界并执行 Wrangler dry-run                               |
+| `npm run check:nginx`  | 在 Linux 上验证真实 Nginx 与 Node 部署链路，需先构建并安装 Nginx、OpenSSL |
 
 ```text
 video-parser/
-├─ frontend/
-│  ├─ src/
-│  │  ├─ api/
-│  │  ├─ composables/
-│  │  ├─ types/
-│  │  ├─ utils/
-│  │  ├─ App.vue
-│  │  └─ main.ts
-│  ├─ .env.example
-│  ├─ package.json
-│  └─ vite.config.mjs
-│
-├─ worker/
-│  ├─ src/
-│  │  ├─ errors/
-│  │  ├─ parsers/
-│  │  ├─ services/
-│  │  ├─ types/
-│  │  ├─ utils/
-│  │  └─ index.ts
-│  ├─ package.json
-│  └─ wrangler.jsonc
-│
-├─ shared/
-│  ├─ media.ts
-│  └─ video.ts
-├─ tests/
-├─ package.json
-└─ README.md
+├── frontend/   # Vue 页面、解析状态与下载交互
+├── backend/    # 共用解析器、HTTP 业务与媒体代理
+├── worker/     # Cloudflare Workers 入口
+├── server/     # Node HTTP 入口与独立构建
+├── shared/     # 前后端共用类型与工具
+├── deploy/     # Nginx、systemd 与环境变量模板
+├── scripts/    # 构建、发布与验收工具
+├── tests/      # 回归测试与离线样本
+└── guides/     # 部署、API 与实现文档
 ```
+
+欢迎通过 [Issues](https://github.com/LittleSunX/video-parser/issues) 反馈问题或提交 Pull Request。反馈时请附上浏览器、部署方式、复现步骤和页面中的“问题信息”；请勿公开含签名的媒体下载地址或访问凭据。提交代码前请运行 `npm run check`。
+
+## 常见问题
+
+<details>
+<summary>为什么有些图片没有标记“无水印”？</summary>
+
+只有明确来自可信无水印字段的资源才会标记。普通图片地址不会自动视为无水印，也不会对图片进行去水印处理。
 
 </details>
 
----
+<details>
+<summary>点击保存后没有找到文件怎么办？</summary>
 
-## 🗺️ Roadmap
+先检查浏览器下载列表和下载权限。页面出现“再次保存”时可点击重试；也可使用“打开直链”或“备用下载”。资源地址过期时，需要重新解析作品。
 
-- [x] 抖音普通视频
-- [x] 图文作品
-- [x] Live Photo
-- [x] 背景音乐
-- [x] 高画质视频流选择
-- [x] 无水印图片字段识别
-- [x] 浏览器直链下载
-- [x] Worker 备用下载
-- [x] Cloudflare 限流
-- [x] Vercel + Worker 生产部署
-- [ ] 快手 Parser
-- [ ] 小红书 Parser
-- [ ] TikTok Parser
-- [ ] Bilibili Parser
+</details>
 
----
+<details>
+<summary>自己部署后，页面能打开但解析失败怎么办？</summary>
 
-## ⚠️ 使用说明
+先确认 API 的 `/api/health` 可访问，再核对前端构建时的 `VITE_API_BASE_URL`。仅发布前端不会自动部署 API。配置正常但个别作品失败时，可能与上游接口变化、资源权限或出口网络有关。
 
-本项目仅处理无需绕过访问控制即可读取的公开资源。
+</details>
 
-- 不支持私密、好友可见等受限作品
-- 不绕过登录、付费、DRM 或其他访问控制
-- 抖音页面结构和接口策略可能变化，解析可用性也可能随之变化
-- “无水印”仅表示上游明确提供了可信的无水印资源字段，并不对所有作品作绝对保证
-- 请遵守相关法律法规、版权要求及平台服务规则
+## 使用与版权
 
----
-
-## ⚖️ 免责声明
-
-本工具仅用于公开内容的解析辅助，请遵守相关法律法规及平台规则。解析内容版权归原作者或相关权利人所有，请勿用于侵权传播、未经授权的商业用途或其他违法违规行为。因不当使用产生的相关责任由使用者自行承担。
-
----
-
-## 📄 版权声明
+本工具仅处理可公开访问的作品，不绕过登录、付费或其他访问控制。解析内容版权归原作者或相关权利人所有，请遵守相关法律法规及平台规则，勿用于侵权传播或未经授权的商业用途。
 
 本项目版权归作者所有，未经授权不得擅自用于商业用途。
-
----
-
-<div align="center">
-
-如果这个项目对你有帮助，欢迎给仓库一个 ⭐
-
-**[在线体验](https://wind-video.ccwu.cc/)** · **[API 状态](https://api.wind-video.ccwu.cc/api/health)**
-
-</div>

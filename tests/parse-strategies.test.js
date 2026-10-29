@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { runParseStrategies } from '../worker/src/parsers/douyin/strategies'
+import { runParseStrategies } from '../backend/src/parsers/douyin/strategies'
 
 afterEach(() => vi.useRealTimers())
 const imageResult = (clean = true) => ({

@@ -19,8 +19,8 @@ vi.mock('../frontend/src/utils/download', () => ({
   buildCoverFilename: () => 'cover.jpg',
   buildMusicFilename: () => 'music.mp3',
 }))
-import { DouyinParser } from '../worker/src/parsers/douyin.ts'
-import { parseVideo } from '../worker/src/services/parse-service.ts'
+import { DouyinParser } from '../backend/src/parsers/douyin.ts'
+import { parseVideo } from '../backend/src/services/parse-service.ts'
 import { formatDuration } from '../frontend/src/utils/duration.ts'
 const originalFetch = global.fetch
 const originalTimeout = global.setTimeout

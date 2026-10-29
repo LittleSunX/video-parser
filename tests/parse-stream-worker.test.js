@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import worker from '../worker/src/index'
-import { parseVideo } from '../worker/src/services/parse-service'
-import { AppError } from '../worker/src/errors/app-error'
-import { errorResponse } from '../worker/src/utils/error-response'
+import { parseVideo } from '../backend/src/services/parse-service'
+import { AppError } from '../backend/src/errors/app-error'
+import { errorResponse } from '../backend/src/utils/error-response'
 
-vi.mock('../worker/src/services/parse-service', () => ({ parseVideo: vi.fn() }))
+vi.mock('../backend/src/services/parse-service', () => ({ parseVideo: vi.fn() }))
 
 const source = 'https://www.douyin.com/video/123'
 const allowed = { limit: vi.fn(async () => ({ success: true })) }

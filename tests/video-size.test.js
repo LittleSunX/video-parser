@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
-import { mapItemToVideoInfo } from '../worker/src/parsers/douyin/map-item'
+import { mapItemToVideoInfo } from '../backend/src/parsers/douyin/map-item'
 import { readVideoPayload } from '../frontend/src/api/response'
-import { mergeMetadata } from '../worker/src/parsers/douyin/ordered-candidates'
+import { mergeMetadata } from '../backend/src/parsers/douyin/ordered-candidates'
 
 const id = '1234567890123456789'
 const source = new URL('https://www.douyin.com/video/' + id)
