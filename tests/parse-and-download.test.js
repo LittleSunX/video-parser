@@ -8,6 +8,7 @@ import { parseVideo as apiParseVideo } from '../frontend/src/api/video'
 import { triggerDownload } from '../frontend/src/utils/download'
 import * as mediaArchive from '../frontend/src/utils/media-archive'
 import { PREPARED_DOWNLOAD_TTL_MS } from '../frontend/src/utils/prepared-download'
+import { VIDEO_BUFFER_BYTES } from '../frontend/src/utils/download-buffer'
 
 vi.mock('../frontend/src/api/video', () => ({ parseVideo: vi.fn() }))
 vi.mock('../frontend/src/utils/download', () => ({
@@ -297,7 +298,8 @@ test('mixed batches retain still images and reject oversized responses without s
   ])
   global.fetch = async () =>
     new Response('large', {
-      headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(129 * 1024 * 1024) },
+      // A 33 MiB video fits the single-video limit but must still exceed the ZIP source limit.
+      headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(33 * 1024 * 1024) },
     })
   await app.handleDownloadAllPreferred()
   assert.equal(clicks.length, 1)
@@ -1248,7 +1250,7 @@ test('failed batch partial files have a short task lifetime', async () => {
   assert.match(app.batchProgress.value, /暂存已到期/)
 })
 
-test.each([64 * 1024 * 1024 + 1, 100 * 1024 * 1024])(
+test.each([VIDEO_BUFFER_BYTES + 1, 200 * 1024 * 1024])(
   'known large video (%s bytes) skips buffered GET and hands off once',
   async (videoSize) => {
     const fetch = vi.fn()
@@ -1264,36 +1266,43 @@ test.each([64 * 1024 * 1024 + 1, 100 * 1024 * 1024])(
   },
 )
 
-test.each([undefined, 64 * 1024 * 1024, 1])(
-  'video with size %s still uses a single direct GET',
+test.each([
+  undefined,
+  64 * 1024 * 1024,
+  65 * 1024 * 1024,
+  100 * 1024 * 1024,
+  VIDEO_BUFFER_BYTES,
+  1,
+])('video with size %s still uses a single direct GET', async (videoSize) => {
+  const { clicks } = mockBrowserSave()
+  const fetch = vi.fn(
+    async () => new Response('video', { headers: { 'Content-Type': 'video/mp4' } }),
+  )
+  global.fetch = fetch
+  const { app, downloads } = createApp()
+  app.video.value = { mediaType: 'video', videoUrl: 'https://cdn/video.mp4', videoSize }
+  await app.handleDownloadVideo()
+  assert.equal(fetch.mock.calls.length, 1)
+  assert.equal(fetch.mock.calls[0][0], 'https://cdn/video.mp4')
+  assert.equal(clicks.length, 1)
+  assert.deepEqual(downloads, [])
+})
+
+test.each([undefined, 1])(
+  'metadata size %s cannot bypass the actual response buffer limit',
   async (videoSize) => {
     const { clicks } = mockBrowserSave()
-    const fetch = vi.fn(
-      async () => new Response('video', { headers: { 'Content-Type': 'video/mp4' } }),
-    )
-    global.fetch = fetch
+    global.fetch = async () =>
+      new Response('too large', {
+        headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(VIDEO_BUFFER_BYTES + 1) },
+      })
     const { app, downloads } = createApp()
     app.video.value = { mediaType: 'video', videoUrl: 'https://cdn/video.mp4', videoSize }
     await app.handleDownloadVideo()
-    assert.equal(fetch.mock.calls.length, 1)
-    assert.equal(fetch.mock.calls[0][0], 'https://cdn/video.mp4')
-    assert.equal(clicks.length, 1)
-    assert.deepEqual(downloads, [])
+    assert.equal(clicks.length, 0)
+    assert.deepEqual(downloads, [{ url: 'https://cdn/video.mp4', filename: 'video.mp4' }])
   },
 )
-
-test('small metadata does not override the actual download size limit', async () => {
-  const { clicks } = mockBrowserSave()
-  global.fetch = async () =>
-    new Response('too large', {
-      headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(64 * 1024 * 1024 + 1) },
-    })
-  const { app, downloads } = createApp()
-  app.video.value = { mediaType: 'video', videoUrl: 'https://cdn/video.mp4', videoSize: 1 }
-  await app.handleDownloadVideo()
-  assert.equal(clicks.length, 0)
-  assert.deepEqual(downloads, [{ url: 'https://cdn/video.mp4', filename: 'video.mp4' }])
-})
 
 test('switching single images resets the target and clearing aborts without fallback', async () => {
   const { clicks } = mockBrowserSave()

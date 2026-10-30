@@ -1,5 +1,5 @@
 import { MediaDownloadError, responseDownloadError } from './download-error'
-import { SINGLE_BUFFER_BYTES } from './download-buffer'
+import { SINGLE_BUFFER_BYTES, VIDEO_BUFFER_BYTES } from './download-buffer'
 
 interface DownloadOptions {
   signal: AbortSignal
@@ -23,7 +23,7 @@ export async function fetchMediaBlob(
     beforeRead,
   }: DownloadOptions,
   kind: 'video' | 'image' | 'audio' = 'video',
-  maxBytes = SINGLE_BUFFER_BYTES,
+  maxBytes = kind === 'video' ? VIDEO_BUFFER_BYTES : SINGLE_BUFFER_BYTES,
 ): Promise<Blob> {
   const controller = new AbortController()
   const cancel = () => controller.abort(signal.reason)

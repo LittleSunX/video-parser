@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { fetchMediaBlob } from '../frontend/src/utils/auto-download'
+import { SINGLE_BUFFER_BYTES, VIDEO_BUFFER_BYTES } from '../frontend/src/utils/download-buffer'
 
 const url = 'https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/music.mp3'
 
@@ -22,6 +23,63 @@ function download(options = {}) {
     'audio',
   )
 }
+
+test.each([
+  ['video', 'video/mp4', 65 * 1024 * 1024, true],
+  ['video', 'video/mp4', VIDEO_BUFFER_BYTES, true],
+  ['video', 'video/mp4', VIDEO_BUFFER_BYTES + 1, false],
+  ['image', 'image/jpeg', SINGLE_BUFFER_BYTES, true],
+  ['image', 'image/jpeg', SINGLE_BUFFER_BYTES + 1, false],
+  ['audio', 'audio/mpeg', SINGLE_BUFFER_BYTES, true],
+  ['audio', 'audio/mpeg', SINGLE_BUFFER_BYTES + 1, false],
+])(
+  'default %s limit handles a %s response of %s bytes (allowed=%s)',
+  async (kind, type, size, allowed) => {
+    // Only the advertised-size gate is under test; stream-count limits are tested separately below.
+    const fetch = vi.fn(
+      async () =>
+        new Response(new Uint8Array([1, 2, 3, 4]), {
+          headers: { 'Content-Type': type, 'Content-Length': String(size) },
+        }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const running = fetchMediaBlob(
+      url,
+      { signal: new AbortController().signal, onProgress: vi.fn() },
+      kind,
+    )
+    if (allowed)
+      expect([...new Uint8Array(await (await running).arrayBuffer())]).toEqual([1, 2, 3, 4])
+    else await expect(running).rejects.toHaveProperty('code', 'TOO_LARGE')
+    expect(fetch).toHaveBeenCalledOnce()
+  },
+)
+
+test.each([true, false])(
+  'an explicit video cap still applies with Content-Length=%s',
+  async (knownLength) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(new Uint8Array([1, 2, 3, 4]), {
+            headers: {
+              'Content-Type': 'video/mp4',
+              ...(knownLength ? { 'Content-Length': '4' } : {}),
+            },
+          }),
+      ),
+    )
+    await expect(
+      fetchMediaBlob(
+        url,
+        { signal: new AbortController().signal, onProgress: vi.fn() },
+        'video',
+        3,
+      ),
+    ).rejects.toHaveProperty('code', 'TOO_LARGE')
+  },
+)
 
 test('a successful audio stream preserves bytes, progress and the ordinary CORS GET', async () => {
   vi.useFakeTimers()
