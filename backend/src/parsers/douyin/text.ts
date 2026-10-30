@@ -1,3 +1,4 @@
+/** 优先使用上游已有的 HTTPS 候选，不改写仅有 HTTP 的签名地址。 */
 export function extractFirstUrl(input: unknown): string | undefined {
   if (typeof input === 'string') {
     const value = normalizeUrl(input)
@@ -5,22 +6,27 @@ export function extractFirstUrl(input: unknown): string | undefined {
   }
 
   if (Array.isArray(input)) {
+    let fallback: string | undefined
     for (const value of input) {
       const url = extractFirstUrl(value)
-      if (url) return url
+      if (url && /^https:\/\//i.test(url)) return url
+      fallback ??= url
     }
-    return undefined
+    return fallback
   }
 
   if (input && typeof input === 'object') {
     const object = input as Record<string, unknown>
+    let fallback: string | undefined
 
     for (const key of ['url_list', 'urlList', 'url', 'src']) {
       if (!(key in object)) continue
 
       const url = extractFirstUrl(object[key])
-      if (url) return url
+      if (url && /^https:\/\//i.test(url)) return url
+      fallback ??= url
     }
+    return fallback
   }
 
   return undefined

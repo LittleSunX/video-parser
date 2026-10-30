@@ -21,6 +21,42 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
+function expectReceiveTimeout({ elapsedMs, statusCode, error }, timeoutMs, graceMs) {
+  if (error) {
+    // Node writes a native 408 and immediately destroys the socket. A client
+    // still uploading may see ECONNRESET instead, or while reading that 408.
+    expect(error.code).toBe('ECONNRESET')
+    if (statusCode !== undefined) expect(statusCode).toBe(408)
+  } else {
+    expect(statusCode).toBe(408)
+  }
+  expect(elapsedMs).toBeGreaterThanOrEqual(timeoutMs)
+  expect(elapsedMs).toBeLessThan(timeoutMs + graceMs)
+}
+
+test('receive-timeout checks reject early disconnects, unrelated errors and wrong responses', () => {
+  const timeoutMs = 10_000
+  const graceMs = 3000
+  const reset = { code: 'ECONNRESET' }
+  for (const outcome of [
+    { elapsedMs: timeoutMs - 1, error: reset },
+    { elapsedMs: timeoutMs - 1, statusCode: 408 },
+    { elapsedMs: timeoutMs + 1, error: { code: 'ECONNREFUSED' } },
+    { elapsedMs: timeoutMs + 1, error: reset, statusCode: 500 },
+    { elapsedMs: timeoutMs + 1, statusCode: 500 },
+    { elapsedMs: timeoutMs + graceMs, error: reset },
+  ]) {
+    expect(() => expectReceiveTimeout(outcome, timeoutMs, graceMs)).toThrow()
+  }
+  for (const outcome of [
+    { elapsedMs: timeoutMs + 1, error: reset },
+    { elapsedMs: timeoutMs + 1, error: reset, statusCode: 408 },
+    { elapsedMs: timeoutMs + 1, statusCode: 408 },
+  ]) {
+    expectReceiveTimeout(outcome, timeoutMs, graceMs)
+  }
+})
+
 test('trusted malformed identity and handler exceptions fail closed with public CORS diagnostics', async () => {
   const handler = vi.fn(async () => {
     throw Error('PRIVATE_UPSTREAM?token=secret')
@@ -159,7 +195,7 @@ test('slow uploads expire and release capacity without timing out completed uplo
   const completion = new Promise((resolve) => {
     finishComplete = resolve
   })
-  const { url } = await start(
+  const { app, url } = await start(
     async (request, runtime, context) => {
       if (request.headers.get('x-fixture') === 'complete') {
         completeSignal = request.signal
@@ -175,12 +211,17 @@ test('slow uploads expire and release capacity without timing out completed uplo
   const requests = []
   const closed = []
   const responses = []
+  const timeoutMs = app.server.requestTimeout
+  const graceMs = app.server.connectionsCheckingInterval + 2000
+  expect(timeoutMs).toBeGreaterThan(0)
   let trickle
   let complete
+  let receiveDeadline
   try {
     // Exercise both declared lengths and chunked bodies over real HTTP. Neither
     // client stops sending, so an inactivity-only timeout would not fix this.
     for (const framing of [{ 'Content-Length': '1024' }, { 'Transfer-Encoding': 'chunked' }]) {
+      const started = performance.now()
       const request = http.request(url + '/api/parse', {
         method: 'POST',
         agent: false,
@@ -193,19 +234,32 @@ test('slow uploads expire and release capacity without timing out completed uplo
       requests.push(request)
       closed.push(new Promise((resolve) => request.once('close', resolve)))
       responses.push(
-        new Promise((resolve, reject) => {
-          request.on('error', reject)
+        new Promise((resolve) => {
+          let statusCode
+          const finish = (error) =>
+            resolve({ elapsedMs: performance.now() - started, statusCode, error })
+          request.on('error', finish)
           request.once('response', (response) => {
-            response.on('error', reject)
-            response.once('end', () => resolve(response.statusCode))
+            statusCode = response.statusCode
+            response.on('error', finish)
+            response.once('end', () => finish())
             response.resume()
           })
         }),
       )
       request.write('{"url":"')
     }
-    // Attach rejection handlers before waiting for admission checks.
-    const expired = Promise.all(responses)
+    // Bound both observable outcomes and actual connection closure. Accepting a
+    // timeout reset must not let a hanging socket or missing deadline pass.
+    const expired = Promise.race([
+      Promise.all([Promise.all(responses), Promise.all(closed)]).then(([outcomes]) => outcomes),
+      new Promise((_, reject) => {
+        receiveDeadline = setTimeout(
+          () => reject(new Error('Slow uploads did not close within their receive deadline')),
+          timeoutMs + graceMs,
+        )
+      }),
+    ])
     void expired.catch(() => {})
     let pulses = 0
     trickle = setInterval(() => {
@@ -232,8 +286,9 @@ test('slow uploads expire and release capacity without timing out completed uplo
     expect(busy.status).toBe(503)
     expect((await busy.json()).error.code).toBe('SERVER_BUSY')
 
-    expect(await expired).toEqual([408, 408])
-    await Promise.all(closed)
+    const outcomes = await expired
+    clearTimeout(receiveDeadline)
+    for (const outcome of outcomes) expectReceiveTimeout(outcome, timeoutMs, graceMs)
     expect(pulses).toBeGreaterThan(5)
     await vi.waitFor(() => expect(slowSignals.every((signal) => signal.aborted)).toBe(true))
     // The fully received request is still allowed to produce a long response.
@@ -246,6 +301,7 @@ test('slow uploads expire and release capacity without timing out completed uplo
     finishComplete()
     expect(await (await complete).text()).toBe('already uploaded')
   } finally {
+    clearTimeout(receiveDeadline)
     clearInterval(trickle)
     for (const request of requests) request.destroy()
     finishComplete()
