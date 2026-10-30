@@ -128,6 +128,8 @@ export function selectBestImageUrl(image: Record<string, unknown>): ImageUrlCand
   candidates.sort((left, right) => {
     if (left.watermarkFree !== right.watermarkFree) return left.watermarkFree ? -1 : 1
     if (left.rank !== right.rank) return left.rank - right.rank
+    const secure = (url: string) => /^https:\/\//i.test(url)
+    if (secure(left.url) !== secure(right.url)) return secure(left.url) ? -1 : 1
     return imageFormatRank(left.url) - imageFormatRank(right.url)
   })
 
@@ -146,19 +148,15 @@ export function extractAllUrls(input: unknown): string[] {
 
   if (input && typeof input === 'object') {
     const object = input as Record<string, unknown>
-    for (const key of ['url_list', 'urlList']) {
+    let fallback: string[] = []
+    for (const key of ['url_list', 'urlList', 'url', 'src']) {
       if (key in object) {
         const urls = extractAllUrls(object[key])
-        if (urls.length > 0) return urls
+        if (urls.some((url) => /^https:\/\//i.test(url))) return [...fallback, ...urls]
+        if (fallback.length === 0) fallback = urls
       }
     }
-
-    for (const key of ['url', 'src']) {
-      if (key in object) {
-        const urls = extractAllUrls(object[key])
-        if (urls.length > 0) return urls
-      }
-    }
+    return fallback
   }
 
   return []
@@ -220,7 +218,10 @@ export function extractLivePhotoUrl(image: Record<string, unknown>): string | un
     const uri = extractUri(address)
 
     if (uri) {
-      if (/^https?:\/\//i.test(uri)) return uri
+      if (/^https?:\/\//i.test(uri)) {
+        const candidate = extractFirstUrl([uri, address])
+        return candidate && !/\.mp3(?:$|\?)/i.test(candidate) ? candidate : uri
+      }
       if (!/mp3/i.test(uri)) return buildLivePhotoPlayUrl(uri)
     }
 
