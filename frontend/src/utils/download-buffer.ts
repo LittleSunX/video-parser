@@ -1,9 +1,11 @@
 import { ref } from 'vue'
 
 // 预算计入源媒体与输出 Blob；浏览器复制、解码和下载管理器占用不在此计数中。
-export const PAGE_BUFFER_BUDGET_BYTES = 128 * 1024 * 1024
-export const SINGLE_BUFFER_BYTES = PAGE_BUFFER_BUDGET_BYTES / 2
-export const ZIP_PART_SOURCE_BYTES = PAGE_BUFFER_BUDGET_BYTES / 4
+export const VIDEO_BUFFER_BYTES = 128 * 1024 * 1024
+export const PAGE_BUFFER_BUDGET_BYTES = VIDEO_BUFFER_BYTES * 2
+// 图片/音乐和 ZIP 的限额独立于视频缓冲预算，避免随视频上限一起增长。
+export const SINGLE_BUFFER_BYTES = 64 * 1024 * 1024
+export const ZIP_PART_SOURCE_BYTES = 32 * 1024 * 1024
 
 /** 页面内仅允许一个缓冲任务；开始另一任务时释放之前保留的文件。 */
 export function createDownloadBufferBudget() {

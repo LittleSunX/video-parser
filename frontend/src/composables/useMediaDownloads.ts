@@ -15,7 +15,7 @@ import {
   createDownloadBufferBudget,
   PAGE_BUFFER_BUDGET_BYTES,
   ZIP_PART_SOURCE_BYTES,
-  SINGLE_BUFFER_BYTES,
+  VIDEO_BUFFER_BYTES,
 } from '../utils/download-buffer'
 import { createPreparedDownload, PREPARED_DOWNLOAD_TTL_MS } from '../utils/prepared-download'
 import {
@@ -211,7 +211,7 @@ export function useMediaDownloads(
     if (
       typeof current.videoSize === 'number' &&
       Number.isSafeInteger(current.videoSize) &&
-      current.videoSize > SINGLE_BUFFER_BYTES
+      current.videoSize > VIDEO_BUFFER_BYTES
     ) {
       startNativeDownload(
         current.videoUrl,

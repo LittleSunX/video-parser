@@ -12,7 +12,7 @@
 └─ 代理下载 → https://api.example.com/api/download → Worker → 抖音媒体 CDN
 ```
 
-**这套部署仍然优先直连。** 直连成功时媒体文件不经过 Worker 或 VPS；直连异常按资源类型回退到 Worker，已知超过 64 MiB 的普通视频和手动选择的“备用下载”直接使用 Worker 代理。64 MiB 是页面缓冲阈值，不是视频下载大小上限；完整条件见 [下载策略](implementation.md#下载策略)。
+**这套部署仍然优先直连。** 直连成功时媒体文件不经过 Worker 或 VPS；直连异常按资源类型回退到 Worker，已知超过 128 MiB 的普通视频和手动选择的“备用下载”直接使用 Worker 代理。普通视频与单个实况 MP4 的页面缓冲门槛为 128 MiB，不是视频下载大小上限；图片、封面和音乐仍为 64 MiB，ZIP 每包媒体内容仍为 32 MiB。完整条件见 [下载策略](implementation.md#下载策略)。
 
 浏览器的解析和代理下载请求直接访问 Worker。VPS 只负责提供网页，安装 Nginx 和证书工具，使用 [纯前端 Nginx 模板](../deploy/frontend-nginx.conf)；无需运行本项目的 Node 后端，也无需配置 `/api` 反向代理。
 
@@ -384,7 +384,7 @@ npm run release:check -- --frontend "$FRONTEND_BASE" --api "$API_BASE" \
 
 1. 新前端能解析公开作品，普通视频、图片和 Worker 支持的实况资源可保存。
 2. “备用下载”可用，批量 ZIP、取消和再次保存正常。
-3. 按 [下载链路核对](implementation.md#如何核对实际下载链路) 查看开发者工具：解析请求指向 **Worker API 域名**；直连成功的下载请求指向**抖音媒体 CDN**；发生代理回退、下载已知超过 64 MiB 的普通视频或手动点击“备用下载”时，才会请求 Worker 的 `/api/download`。新前端域名的 `/api/health` 返回 404 是本方案的预期行为。
+3. 按 [下载链路核对](implementation.md#如何核对实际下载链路) 查看开发者工具：解析请求指向 **Worker API 域名**；直连成功的下载请求指向**抖音媒体 CDN**；发生代理回退、下载已知超过 128 MiB 的普通视频或手动点击“备用下载”时，才会请求 Worker 的 `/api/download`。新前端域名的 `/api/health` 返回 404 是本方案的预期行为。
 4. 刷新页面后显示新前端版本；`release:check` 输出 `passed: true`。
 
 结合第 6 步续期演练的结果记录验收状态；版本检查通过不代表续期或完整文件保存已经通过。若是迁移，确认解析与保存通过后再停用旧前端；有意保留旧 Worker 时，分别核对两个版本，不必为了提交号相同而重发 Worker。[分别检查前后端版本](../RELEASE_CHECK.md#前后端分别发布时)

@@ -5,7 +5,7 @@ import { useVideoPage } from '../frontend/src/composables/useVideoPage'
 import { parseVideo } from '../frontend/src/api/video'
 import { saveBlob } from '../frontend/src/utils/auto-download'
 import { buildLivePhotoFilename, triggerDownload } from '../frontend/src/utils/download'
-import { SINGLE_BUFFER_BYTES } from '../frontend/src/utils/download-buffer'
+import { VIDEO_BUFFER_BYTES } from '../frontend/src/utils/download-buffer'
 import * as mediaArchive from '../frontend/src/utils/media-archive'
 import * as batchDownload from '../frontend/src/utils/batch-download'
 import { MediaDownloadError } from '../frontend/src/utils/download-error'
@@ -236,6 +236,29 @@ test('image feedback and save-again keep the identity of the file actually downl
   expect(app.imageDownloadName.value).toBe('第 1 张图片')
 })
 
+test.each([65 * 1024 * 1024, 100 * 1024 * 1024, VIDEO_BUFFER_BYTES])(
+  'a live MP4 advertised as %s bytes stays on the direct buffered path',
+  async (size) => {
+    // Exercise the header limit without allocating a 128 MiB fixture in every CI worker.
+    const fetch = vi.fn(
+      async () =>
+        new Response('live fixture', {
+          headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(size) },
+        }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const app = page()
+    await app.handleDownloadLivePhoto(0)
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(firstLiveUrl, expect.any(Object))
+    expect(app.downloadState.value).toBe('handed-off')
+    expect(app.bufferBusy.value).toBe(false)
+    expect(app.canSaveVideoAgain.value).toBe(true)
+    expect(saveBlob).toHaveBeenCalledOnce()
+    expect(await vi.mocked(saveBlob).mock.calls[0][0].text()).toBe('live fixture')
+    expect(triggerDownload).not.toHaveBeenCalled()
+  },
+)
+
 test.each([
   ['CORS rejection', () => Promise.reject(new TypeError('Failed to fetch'))],
   ['HTTP 403', () => Promise.resolve(new Response('forbidden', { status: 403 }))],
@@ -246,7 +269,7 @@ test.each([
         new Response('large', {
           headers: {
             'Content-Type': 'video/mp4',
-            'Content-Length': String(SINGLE_BUFFER_BYTES + 1),
+            'Content-Length': String(VIDEO_BUFFER_BYTES + 1),
           },
         }),
       ),

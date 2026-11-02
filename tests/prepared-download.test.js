@@ -7,6 +7,7 @@ import {
   createDownloadBufferBudget,
   PAGE_BUFFER_BUDGET_BYTES,
   SINGLE_BUFFER_BYTES,
+  VIDEO_BUFFER_BYTES,
   ZIP_PART_SOURCE_BYTES,
 } from '../frontend/src/utils/download-buffer'
 
@@ -97,14 +98,21 @@ test('buffer tasks are mutually exclusive and a new task releases retained files
   expect(ZIP_PART_SOURCE_BYTES).toBe(32 * 1024 * 1024)
 })
 
+test('video buffering grows while small-file and ZIP limits stay unchanged', () => {
+  expect(VIDEO_BUFFER_BYTES).toBe(128 * 1024 * 1024)
+  expect(PAGE_BUFFER_BUDGET_BYTES).toBe(256 * 1024 * 1024)
+  expect(SINGLE_BUFFER_BYTES).toBe(64 * 1024 * 1024)
+  expect(ZIP_PART_SOURCE_BYTES).toBe(32 * 1024 * 1024)
+})
+
 test('retained buffers cannot exceed the page total, and native tasks cannot clear an active buffer', () => {
   const budget = createDownloadBufferBudget()
   const first = budget.register(vi.fn())
   const second = budget.register(vi.fn())
-  budget.retain(first, SINGLE_BUFFER_BYTES)
-  budget.retain(second, SINGLE_BUFFER_BYTES)
+  budget.retain(first, VIDEO_BUFFER_BYTES)
+  budget.retain(second, VIDEO_BUFFER_BYTES)
   expect(budget.heldBytes.value).toBe(PAGE_BUFFER_BUDGET_BYTES)
-  expect(() => budget.retain(second, SINGLE_BUFFER_BYTES + 1)).toThrow('预算')
+  expect(() => budget.retain(second, VIDEO_BUFFER_BYTES + 1)).toThrow('预算')
   const release = budget.acquire(first, PAGE_BUFFER_BUDGET_BYTES)
   expect(budget.clearRetained()).toBe(false)
   release()
