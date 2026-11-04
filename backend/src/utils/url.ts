@@ -1,4 +1,8 @@
 import { AppError } from '../errors/app-error'
+import { currentPageVideoId } from '../parsers/douyin/page'
+import { extractDouyinVideoId } from './douyin-id'
+
+export { extractDouyinVideoId } from './douyin-id'
 
 const SUPPORTED_HOST_SUFFIXES = ['douyin.com', 'iesdouyin.com']
 
@@ -76,7 +80,7 @@ export async function resolveSupportedUrl(inputUrl: URL, signal?: AbortSignal): 
       if (![301, 302, 303, 307, 308].includes(response.status)) {
         if (response.ok) {
           const html = await response.text()
-          const videoId = extractDouyinVideoIdFromHtml(html)
+          const videoId = currentPageVideoId(html, current.toString())
 
           if (videoId) {
             return new URL('https://www.iesdouyin.com/share/video/' + videoId)
@@ -100,41 +104,4 @@ export async function resolveSupportedUrl(inputUrl: URL, signal?: AbortSignal): 
   }
 
   throw new AppError('URL_RESOLVE_FAILED', '分享链接重定向次数过多', 502)
-}
-
-export function extractDouyinVideoId(url: URL): string | undefined {
-  const patterns = [
-    /\/share\/(?:video|note|slides)\/(\d+)/,
-    /\/(?:video|note|slides)\/(\d+)/,
-    /\/aweme\/detail\/(\d+)/,
-  ]
-
-  for (const pattern of patterns) {
-    const match = url.pathname.match(pattern)
-    if (match?.[1]) return match[1]
-  }
-
-  return (
-    url.searchParams.get('modal_id') ??
-    url.searchParams.get('aweme_id') ??
-    url.searchParams.get('video_id') ??
-    undefined
-  )
-}
-
-function extractDouyinVideoIdFromHtml(html: string): string | undefined {
-  const patterns = [
-    /"aweme_id"\s*:\s*"(\d+)"/,
-    /"itemId"\s*:\s*"(\d+)"/,
-    /\/share\/(?:video|note|slides)\/(\d+)/,
-    /\/(?:video|note|slides)\/(\d+)/,
-    /modal_id=(\d+)/,
-  ]
-
-  for (const pattern of patterns) {
-    const match = html.match(pattern)
-    if (match?.[1]) return match[1]
-  }
-
-  return undefined
 }

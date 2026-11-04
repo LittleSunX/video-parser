@@ -1,6 +1,7 @@
 import { test, expect, afterEach, vi } from 'vitest'
 import { DouyinParser } from '../backend/src/parsers/douyin'
 import { mapItemToVideoInfo } from '../backend/src/parsers/douyin/map-item'
+import { extractImageAssets, hasAllImageResources } from '../backend/src/parsers/douyin/images'
 import { runParseStrategies } from '../backend/src/parsers/douyin/strategies'
 import { buildImageFilename } from '../frontend/src/utils/download'
 import { downloadMediaArchive } from '../frontend/src/utils/batch-download'
@@ -161,6 +162,166 @@ test('same image in supported lists is merged with its live track', () => {
     id,
   )
   expect(result.video.images).toHaveLength(1)
+})
+
+test.each([false, true])(
+  'complementary still-only and live-only lists are complete in either order (%s)',
+  async (liveFirst) => {
+    const still = {
+      uri: 'same-image-id',
+      watermark_free_download_url_list: ['https://p.douyinpic.com/still.jpg'],
+    }
+    const live = { uri: 'same-image-id', video: { play_addr: { uri: 'live-one' } } }
+    const mapped = mapItemToVideoInfo(
+      {
+        aweme_id: id,
+        image_post_info: { images: [liveFirst ? live : still] },
+        images: [liveFirst ? still : live],
+      },
+      url,
+      id,
+    )
+    expect(mapped.video.images).toHaveLength(1)
+    expect(mapped.imagesComplete).toBe(true)
+    expect(mapped.video.images[0]).toMatchObject({ url: still.watermark_free_download_url_list[0] })
+    expect(mapped.video.images[0].livePhotoUrl).toContain('video_id=live-one')
+    const fallback = vi.fn(async () => {
+      throw new Error('complete merged resources should not need another source')
+    })
+    const result = await runParseStrategies([
+      { name: 'first', run: async () => mapped },
+      { name: 'fallback', run: fallback },
+    ])
+    expect(fallback).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ imagesComplete: true, parseStatus: 'complete' })
+  },
+)
+
+test.each([
+  [
+    'still URL',
+    { watermark_free_download_url_list: ['https://p.douyinpic.com/one.jpg'], video: {} },
+    {
+      watermark_free_download_url_list: ['https://p.douyinpic.com/one.jpg'],
+      video: { play_addr: { uri: 'live-one' } },
+    },
+  ],
+  [
+    'live URL',
+    { video: { play_addr: { uri: 'live-one' } } },
+    {
+      watermark_free_download_url_list: ['https://p.douyinpic.com/one.jpg'],
+      video: { play_addr: { uri: 'live-one' } },
+    },
+  ],
+])('a shared %s can recover missing resources without a URI', (_identity, first, second) => {
+  const mapped = mapItemToVideoInfo({ images: [first], image_list: [second] }, url, id)
+  expect(mapped.video.images).toHaveLength(1)
+  expect(mapped.imagesComplete).toBe(true)
+  expect(hasAllImageResources(mapped.video.images)).toBe(true)
+})
+
+test.each([{}, null, [], 'unknown', { uri: 'unmatched' }, { video: {} }])(
+  'an unidentifiable or unmatched raw slot remains incomplete: %j',
+  (missing) => {
+    const mapped = mapItemToVideoInfo(
+      {
+        images: [
+          { uri: 'one', watermark_free_download_url_list: ['https://p.douyinpic.com/one.jpg'] },
+          missing,
+        ],
+      },
+      url,
+      id,
+    )
+    expect(mapped.video.images).toHaveLength(1)
+    expect(mapped.imagesComplete).toBe(false)
+    expect(mapped.video.images[0].url).toBe('https://p.douyinpic.com/one.jpg')
+  },
+)
+
+test('a resource-less duplicate with a known URI is restored by that same image', () => {
+  const mapped = mapItemToVideoInfo(
+    {
+      images: [{ uri: 'one' }],
+      image_list: [
+        { uri: 'one', watermark_free_download_url_list: ['https://p.douyinpic.com/one.jpg'] },
+      ],
+    },
+    url,
+    id,
+  )
+  expect(mapped.video.images).toHaveLength(1)
+  expect(mapped.imagesComplete).toBe(true)
+})
+
+test('merging a still-only duplicate cannot hide a declared missing live track', () => {
+  const mapped = mapItemToVideoInfo(
+    {
+      images: [{ uri: 'one', video: {} }],
+      image_list: [
+        { uri: 'one', watermark_free_download_url_list: ['https://p.douyinpic.com/one.jpg'] },
+      ],
+    },
+    url,
+    id,
+  )
+  expect(mapped.video.images).toHaveLength(1)
+  expect(mapped.imagesComplete).toBe(false)
+  expect(hasAllImageResources(mapped.video.images)).toBe(false)
+})
+
+test('unrelated still-only and live-only slots are never paired by position', () => {
+  const mapped = mapItemToVideoInfo(
+    {
+      image_post_info: {
+        images: [
+          {
+            uri: 'still-one',
+            watermark_free_download_url_list: ['https://p.douyinpic.com/one.jpg'],
+          },
+        ],
+      },
+      images: [{ uri: 'live-two', video: { play_addr: { uri: 'live-two' } } }],
+    },
+    url,
+    id,
+  )
+  expect(mapped.video.images).toHaveLength(2)
+  expect(mapped.imagesComplete).toBe(false)
+  expect(mapped.video.images[0].livePhotoUrl).toBeUndefined()
+  expect(mapped.video.images[1].url).toBe('')
+})
+
+test('a later identity bridge restores all matching slots without discarding a missing one', () => {
+  const images = [
+    { uri: 'still-one', watermark_free_download_url_list: ['https://p.douyinpic.com/one.jpg'] },
+    { uri: 'live-two', video: { play_addr: { uri: 'live-two' } } },
+    {
+      uri: 'still-one',
+      watermark_free_download_url_list: ['https://p.douyinpic.com/one.jpg'],
+      video: { play_addr: { uri: 'live-two' } },
+    },
+  ]
+  const complete = mapItemToVideoInfo({ images }, url, id)
+  expect(complete.video.images).toHaveLength(1)
+  expect(complete.imagesComplete).toBe(true)
+  expect(hasAllImageResources(complete.video.images)).toBe(true)
+  const incomplete = mapItemToVideoInfo({ images: [...images, {}] }, url, id)
+  expect(incomplete.video.images).toHaveLength(1)
+  expect(incomplete.imagesComplete).toBe(false)
+})
+
+test('extractImageAssets keeps returning only visible image assets', () => {
+  const images = extractImageAssets([
+    {},
+    { uri: 'missing' },
+    { uri: 'still-one', watermark_free_download_url_list: ['https://p.douyinpic.com/one.jpg'] },
+  ])
+  expect(images).toHaveLength(1)
+  expect(images[0]).toMatchObject({ url: 'https://p.douyinpic.com/one.jpg', watermarkFree: true })
+  expect(JSON.stringify(images)).not.toContain('"uri"')
+  expect(extractImageAssets(null)).toEqual([])
 })
 
 test('proxy rejects HTTP 200 HTML challenge', async () => {
