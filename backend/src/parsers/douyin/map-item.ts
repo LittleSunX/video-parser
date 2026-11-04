@@ -2,7 +2,7 @@ import { AppError } from '../../errors/app-error'
 import type { VideoInfo } from '../../types/video'
 import type { DouyinItem, ParsedMediaResult } from './types'
 import { normalizeAwemeId } from './items'
-import { extractImageAssets, selectBestImageUrl, extractLivePhotoUrl } from './images'
+import { extractImageAssetsWithCompleteness } from './images'
 import { selectBestBitRateStream } from './streams'
 import { extractFirstUrl, normalizeUrl, normalizeText, readNumber, toPlayableUrl } from './text'
 
@@ -23,7 +23,7 @@ export function mapItemToVideoInfo(
     ...(item.images ?? []),
     ...(item.image_list ?? []),
   ]
-  const imageAssets = extractImageAssets(rawImages)
+  const { images: imageAssets, imagesComplete } = extractImageAssetsWithCompleteness(rawImages)
   const video = item.video ?? {}
   const musicUrl = extractFirstUrl(item.music?.play_url)
   const cover =
@@ -45,14 +45,7 @@ export function mapItemToVideoInfo(
       musicUrl: musicUrl ? normalizeUrl(musicUrl) : undefined,
       musicTitle: item.music?.title ? normalizeText(item.music.title) : undefined,
     }
-    const incompleteImages = rawImages.some((image) => {
-      if (!image || typeof image !== 'object' || Array.isArray(image)) return true
-      const value = image as Record<string, unknown>
-      const liveUrl = extractLivePhotoUrl(value)
-      if (!selectBestImageUrl(value)?.url) return true
-      return !!(value.video || value.video_play_addr || value.video_download_addr) && !liveUrl
-    })
-    return { video: result, imagesComplete: !incompleteImages }
+    return { video: result, imagesComplete }
   }
 
   const bestBitRateStream = selectBestBitRateStream(video.bit_rate)

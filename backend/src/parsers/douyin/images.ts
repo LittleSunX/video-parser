@@ -47,20 +47,30 @@ export function mergeImageAssets(first: ImageAsset[], second: ImageAsset[]): Ima
 }
 
 export function extractImageAssets(input: unknown): ImageAsset[] {
+  return extractImageAssetsWithCompleteness(input).images
+}
+
+/** Preserve missing slots until resources with the same identity have been merged. */
+export function extractImageAssetsWithCompleteness(input: unknown): {
+  images: ImageAsset[]
+  imagesComplete: boolean
+} {
   if (!Array.isArray(input)) {
-    return []
+    return { images: [], imagesComplete: false }
   }
 
   const assets: ImageAsset[] = []
+  let unknownSlots = false
 
   for (const image of input) {
-    if (!image || typeof image !== 'object' || Array.isArray(image)) continue
+    if (!image || typeof image !== 'object' || Array.isArray(image)) {
+      unknownSlots = true
+      continue
+    }
 
     const object = image as Record<string, unknown>
     const selected = selectBestImageUrl(object)
     const livePhotoUrl = extractLivePhotoUrl(object)
-
-    if (!selected?.url && !livePhotoUrl) continue
 
     const normalizedImage = selected?.url ? normalizeUrl(selected.url) : ''
     const normalizedLive = livePhotoUrl ? toPlayableUrl(normalizeUrl(livePhotoUrl)) : undefined
@@ -84,7 +94,13 @@ export function extractImageAssets(input: unknown): ImageAsset[] {
     assets.push(asset)
   }
 
-  return mergeImageAssets([], assets)
+  // Empty objects stay as internal missing slots. A known URI may connect an empty
+  // duplicate to recovered resources, but unrelated slots cannot disappear or pair by position.
+  const merged = mergeImageAssets([], assets)
+  return {
+    images: merged.filter((asset) => !!asset.url || !!asset.livePhotoUrl),
+    imagesComplete: !unknownSlots && hasAllImageResources(merged),
+  }
 }
 
 export interface ImageUrlCandidate {
