@@ -35,3 +35,8 @@ Thumbs.db
 
 # Local project notes
 /docs/
+
+# Generated test artifacts
+/test-results/
+/playwright-report/
+/server/node-build-*/

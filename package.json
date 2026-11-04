@@ -26,23 +26,28 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run format:check && npm run lint && npm test && npm run build"
+    "check": "npm run format:check && npm run lint && npm test && npm run build",
+    "test:browser": "playwright test",
+    "diagnostics:summary": "node scripts/summarize-diagnostics.mjs"
   },
   "engines": {
     "node": "^22.13.0 || >=24.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
+    "esbuild": "0.28.2",
     "eslint": "^10.11.0",
     "eslint-plugin-vue": "^10.11.1",
-    "esbuild": "0.28.2",
     "globals": "^16.5.0",
     "miniflare": "5.20260921.0-alpha",
     "prettier": "^3.9.9",
     "typescript-eslint": "^8.70.1",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.3"
   },
   "overrides": {
-    "undici": "7.29.1"
+    "undici": "7.30.1",
+    "sharp": "0.35.5",
+    "minimatch": "11.0.1"
   }
 }

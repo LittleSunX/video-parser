@@ -134,13 +134,15 @@ npm run check
 
 该命令包含格式检查、ESLint、测试、类型检查和构建。常用命令：
 
-| 命令                   | 用途                                                                      |
-| ---------------------- | ------------------------------------------------------------------------- |
-| `npm test`             | 运行测试                                                                  |
-| `npm run format`       | 格式化代码和文档                                                          |
-| `npm run build`        | 构建前端、检查共用核心和 Worker 类型、构建 Node 服务                      |
-| `npm run check:worker` | 检查 Worker 打包边界并执行 Wrangler dry-run                               |
-| `npm run check:nginx`  | 在 Linux 上验证真实 Nginx 与 Node 部署链路，需先构建并安装 Nginx、OpenSSL |
+| 命令                                        | 用途                                                                      |
+| ------------------------------------------- | ------------------------------------------------------------------------- |
+| `npm test`                                  | 运行测试                                                                  |
+| `npm run test:browser`                      | 运行 Chromium / WebKit 离线下载验收，首次需安装测试浏览器，见实现文档     |
+| `npm run diagnostics:summary -- <日志文件>` | 汇总诊断日志的解析终态、P50/P95 耗时与策略尝试，见实现文档                |
+| `npm run format`                            | 格式化代码和文档                                                          |
+| `npm run build`                             | 构建前端、检查共用核心和 Worker 类型、构建 Node 服务                      |
+| `npm run check:worker`                      | 检查 Worker 打包边界并执行 Wrangler dry-run                               |
+| `npm run check:nginx`                       | 在 Linux 上验证真实 Nginx 与 Node 部署链路，需先构建并安装 Nginx、OpenSSL |
 
 ```text
 video-parser/

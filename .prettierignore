@@ -3,3 +3,8 @@ node_modules
 **/.wrangler
 coverage
 package-lock.json
+
+# Generated test artifacts
+/test-results/
+/playwright-report/
+/server/node-build-*/

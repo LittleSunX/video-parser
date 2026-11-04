@@ -4,7 +4,18 @@ import vue from 'eslint-plugin-vue'
 import globals from 'globals'
 
 export default ts.config(
-  { ignores: ['**/node_modules/**', '**/dist/**', '**/.wrangler/**', 'coverage/**'] },
+  {
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/.wrangler/**',
+      'coverage/**',
+      'test-results/**',
+      'playwright-report/**',
+      'server/node-build-*/**',
+      'docs/**',
+    ],
+  },
   js.configs.recommended,
   ...ts.configs.recommended,
   ...vue.configs['flat/essential'],
