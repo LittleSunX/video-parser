@@ -1,3 +1,4 @@
+import { readUpstreamText } from '../utils/upstream-body'
 import { createUpstreamAttempt, type Diagnostics } from '../utils/diagnostics'
 import { AppError } from '../errors/app-error'
 import type { VideoInfo } from '../types/video'
@@ -93,15 +94,16 @@ export class DouyinParser implements VideoParser {
         attempt + 1,
         signal,
       )
+      const requestSignal = signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
+        : AbortSignal.timeout(8000)
       try {
         signal?.throwIfAborted()
         const response = await diagnostic.response(() =>
           fetch(endpoint, {
             headers: buildWebDetailHeaders(),
             redirect: 'follow',
-            signal: signal
-              ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
-              : AbortSignal.timeout(8000),
+            signal: requestSignal,
           }),
         )
 
@@ -111,7 +113,7 @@ export class DouyinParser implements VideoParser {
           continue
         }
 
-        const text = await diagnostic.read(() => response.text())
+        const text = await diagnostic.read(() => readUpstreamText(response, requestSignal))
         if (!text.trim()) {
           diagnostic.result('empty_response')
           lastError = '接口返回空响应'
@@ -181,6 +183,9 @@ export class DouyinParser implements VideoParser {
         index + 1,
         signal,
       )
+      const requestSignal = signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
+        : AbortSignal.timeout(10000)
       try {
         signal?.throwIfAborted()
         const response = await diagnostic.response(() =>
@@ -188,9 +193,7 @@ export class DouyinParser implements VideoParser {
             method: 'GET',
             headers: buildPageHeaders(),
             redirect: 'follow',
-            signal: signal
-              ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
-              : AbortSignal.timeout(10000),
+            signal: requestSignal,
           }),
         )
 
@@ -200,7 +203,7 @@ export class DouyinParser implements VideoParser {
           continue
         }
 
-        const html = await diagnostic.read(() => response.text())
+        const html = await diagnostic.read(() => readUpstreamText(response, requestSignal))
 
         const result = diagnostic.extract(() => {
           if (!html || html.length < 1000) {
@@ -288,6 +291,7 @@ export class DouyinParser implements VideoParser {
           index + 1,
           attemptSignal,
         )
+        const requestSignal = AbortSignal.any([attemptSignal, AbortSignal.timeout(8000)])
         try {
           attemptSignal.throwIfAborted()
           const response = await diagnostic.response(() =>
@@ -297,7 +301,7 @@ export class DouyinParser implements VideoParser {
                 Accept: 'application/json, text/plain, */*',
               },
               redirect: 'follow',
-              signal: AbortSignal.any([attemptSignal, AbortSignal.timeout(8000)]),
+              signal: requestSignal,
             }),
           )
 
@@ -306,7 +310,9 @@ export class DouyinParser implements VideoParser {
             return
           }
 
-          const data = await diagnostic.read(() => response.json() as Promise<unknown>)
+          const data = await diagnostic.read(
+            async () => JSON.parse(await readUpstreamText(response, requestSignal)) as unknown,
+          )
           const result = diagnostic.extract(() => {
             const item = findMediaItem(data, videoId)
             return item ? mapItemToVideoInfo(item, sourceUrl, videoId) : undefined
@@ -341,15 +347,16 @@ export class DouyinParser implements VideoParser {
   ): Promise<ParsedMediaResult> {
     const release = await attempts?.acquire(1)
     const diagnostic = createUpstreamAttempt(trace, 'page-meta', 'current-page', 1, signal)
+    const requestSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
+      : AbortSignal.timeout(8000)
     try {
       signal?.throwIfAborted()
       const response = await diagnostic.response(() =>
         fetch(sourceUrl.toString(), {
           headers: buildPageHeaders(),
           redirect: 'follow',
-          signal: signal
-            ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
-            : AbortSignal.timeout(8000),
+          signal: requestSignal,
         }),
       )
 
@@ -362,7 +369,7 @@ export class DouyinParser implements VideoParser {
         )
       }
 
-      const html = await diagnostic.read(() => response.text())
+      const html = await diagnostic.read(() => readUpstreamText(response, requestSignal))
 
       return diagnostic.extract(() => {
         if (!pageMatchesExpectedVideo(response.url, html, videoId)) {

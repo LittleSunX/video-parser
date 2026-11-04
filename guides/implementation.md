@@ -218,15 +218,41 @@ npm run check
 
 - `frontend/src/composables/useVideoPage.ts`：解析请求及取消状态。
 - `frontend/src/composables/useMediaDownloads.ts`：视频、图片及批量下载生命周期。
+- `frontend/src/composables/useBatchDownload.ts`：批量会话、分包、失败重试和缓存生命周期；页面标志由统一任务阶段推导。
+- `frontend/src/utils/image-download-targets.ts`：动态优先/原图下载目标与名称计算。
 - `frontend/src/composables/useNotice.ts`：通知及定时器清理。
 - `backend/src/parsers/douyin.ts`：请求策略与兜底顺序。
 - `backend/src/parsers/douyin/`：页面提取、作品匹配、媒体选择和结果映射。
 - `shared/media.ts`：前后端共用图片 MIME 与下载后缀处理。
 - `shared/video.ts`：前后端共用 API 类型，图文完整性通过可选 `imagesComplete` 与无水印确认分别表达。
+- `shared/video-contract.ts`：JSON、渐进预览与最终结果共用的运行时校验；兼容范围见 [API 数据契约](api.md#数据契约与版本兼容)。
 
 GitHub Actions 会在 main 推送和 Pull Request 时，分别在 Windows 与 Linux 上使用 Node 22、24，从锁文件安装依赖并执行 `npm run check`。另一个 Linux 作业安装 Nginx 和 OpenSSL，执行 `npm run check:nginx` 验证部署链路。配置不会自动发布前后端。
 
-开发依赖中的 Miniflare 暂时通过根目录 `overrides` 固定 `undici@7.29.1`；锁定版本不代表没有安全公告，部署前需结合实际 `npm audit` 结果复核，依赖升级后重新运行回归检查。
+开发依赖暂时通过根目录 `overrides` 固定 `undici@7.30.1`、`sharp@0.35.5` 和 `minimatch@11.0.1`，覆盖 Miniflare 与 lint 工具链尚未放宽的传递依赖，修复已知安全告警。Vitest、Vite 的最低版本分别为 5.0.3、8.3.5，`source-map-js` 的修复版本记录在锁文件中。上游依赖支持修复版本后再移除对应 override；尤其 `minimatch` 跨了主版本，更新时必须复核 ESLint 文件匹配、测试发现和构建。部署前运行 `npm audit`，依赖更新后执行完整检查、Worker 检查与浏览器回归。
+
+### 浏览器下载回归
+
+首次安装测试浏览器，然后执行独立的浏览器检查：
+
+```bash
+npx playwright install chromium webkit
+npm run test:browser
+```
+
+Linux CI 使用 `npx playwright install --with-deps chromium webkit` 安装运行依赖。
+该检查构建前端并在本地 4178 端口启动预览，强制使用同源测试 API，通过拦截请求提供离线解析与媒体样本；原生代理下载使用本地 HTTP 附件响应。
+它验证直连保存与再次保存、代理回退、取消后重试、ZIP 内容、连续分包及切换作品；不会访问生产 API 或抖音。
+下载事件之外还检查浏览器生成的文件字节、文件名与 ZIP 条目。失败截图与追踪文件位于已忽略的 `test-results/`。
+测试需要浏览器运行时，因此保留为独立命令和 CI 作业；`npm run check` 继续执行原有的检查链。
+桌面 WebKit 不能代替 iPhone Safari、应用内浏览器及系统相册的实际保存验收。
+
+### 上游解析正文限制
+
+短链落地页和四种解析策略通过 `backend/src/utils/upstream-body.ts` 读取 HTML/JSON。
+每个响应的实际读取上限为 8 MiB；无长度头、长度头不准确及已解压正文同样受限。
+分块 UTF-8 解码保留跨块字符，读取沿用本次请求的期限和取消信号；超限、异常或取消均释放读取锁，取消清理不会阻塞策略回退。
+该限额只约束解析文本，媒体下载继续使用独立的流式传输与前端缓冲规则。
 
 ## 版本与验收
 
@@ -237,6 +263,29 @@ Node 的版本在 build 时生成并存入 `server/dist/version.json`，重启�
 响应还通过 `Server-Timing` 提供在响应头发送前已完成的固定 `worker`、`resolve`、`primary` 耗时（毫秒），不包含作品信息或媒体地址。普通 JSON 的 `worker` 包含内部各阶段，不能与另外两项再次相加；渐进解析及下载的 `worker` 仅表示响应准备耗时。渐进解析的最终等待通过 `parse_stream_complete` 和 `parse_selection` 日志测量，不能用响应头到达时间替代。开发模式前端分别输出响应头到达与最终结果耗时。
 
 每次现有上游请求记录一条 `upstream_attempt`，分开测量响应等待、读体和提取耗时，并记录固定接口类别、尝试次数、HTTP 状态和结果类别。`parse_first_usable` 与 `parse_selection` 分别记录首次可用内容和最终选优时间，以及图片、动态轨、无水印确认数量和作者、封面、音乐是否存在。日志字段与类别经过白名单过滤，不包含分享文案、作品标题、媒体地址或原始异常；诊断不额外调用上游接口。
+
+### 本地诊断统计
+
+把应用直接输出的 JSON 日志保存为每行一条记录的 NDJSON 文件后，在仓库根目录执行：
+
+```bash
+npm run diagnostics:summary -- docs/api.ndjson
+npm run diagnostics:summary -- docs/api.ndjson --version VERSION_ID
+```
+
+也可把文件参数换成 `-` 从标准输入读取。需要将报告另存为纯 JSON 时，使用 `node scripts/summarize-diagnostics.mjs docs/api.ndjson > docs/summary.json`，避免 npm 自身的命令提示进入结果文件。带平台时间前缀或 JSON 外层包装的日志应先导出为原始应用记录；工具不猜测或提取包装内容。
+
+统计按请求编号关联交错日志，忽略重复事件与同一策略、接口、尝试编号的重复记录。报告包含解析终态、首个可用结果与最终结果的 P50/P95、四种策略的尝试/成功/取消/429/超时次数及耗时、每个已观察解析的上游尝试次数，以及解析与下载各自的 HTTP 状态计数。输出仅含固定字段和聚合数字，不包含请求编号、版本值、作品信息或媒体地址；原始日志与报告可放在已忽略的 `docs/`。
+
+统计口径如下：
+
+- `complete` 与 `unverified` 均属于有可用结果的成功；成功率分母为这两类加 `failed`，取消与尚无终态的请求单独列出。预检的 HTTP 204 只计入响应状态。
+- 渐进响应的 HTTP 200 仅表示响应开始，不能当作解析成功。最终流事件优先于策略选择；选择完成后取消的请求仍计入取消。
+- 延迟只使用 `sinceRequestMs`，覆盖输入处理与短链解析；缺少该字段的旧日志不计入耗时样本。普通 JSON 使用最终选择时间，渐进响应使用流结束时间；早期错误没有终态时间时不推算耗时。
+- `successes` 表示上游尝试返回可用结果，可能参与合并，不等于最终结果独占来自该策略。取消的竞争请求与失败分开统计。
+- `attemptsPerObservedParse` 包含未完成请求，适合比较相同采样窗口；日志缺失会影响成功率与请求次数，不能当作完整的生产指标。单次最多读取 64 MiB、每行 64 KiB、关联 100,000 个请求，超过限制应分批统计。
+
+### 发布与保存验收
 
 下载响应成功不代表手机已经保存，真实保存行为需单独验收。
 

@@ -1,3 +1,4 @@
+import { readUpstreamText } from './upstream-body'
 import { AppError } from '../errors/app-error'
 import { currentPageVideoId } from '../parsers/douyin/page'
 import { extractDouyinVideoId } from './douyin-id'
@@ -56,6 +57,9 @@ export async function resolveSupportedUrl(inputUrl: URL, signal?: AbortSignal): 
       return current
     }
 
+    const requestSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
+      : AbortSignal.timeout(8000)
     let response: Response
 
     try {
@@ -67,9 +71,7 @@ export async function resolveSupportedUrl(inputUrl: URL, signal?: AbortSignal): 
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'zh-CN,zh;q=0.9',
         },
-        signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
-          : AbortSignal.timeout(8000),
+        signal: requestSignal,
       })
     } catch {
       signal?.throwIfAborted()
@@ -79,7 +81,7 @@ export async function resolveSupportedUrl(inputUrl: URL, signal?: AbortSignal): 
     try {
       if (![301, 302, 303, 307, 308].includes(response.status)) {
         if (response.ok) {
-          const html = await response.text()
+          const html = await readUpstreamText(response, requestSignal)
           const videoId = currentPageVideoId(html, current.toString())
 
           if (videoId) {

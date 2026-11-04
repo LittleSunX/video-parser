@@ -49,3 +49,21 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y nginx openssl
       - name: Exercise the deployment template with real Nginx and Node
         run: npm run check:nginx
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:browser
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-traces
+          path: test-results/
+          retention-days: 7

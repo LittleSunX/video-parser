@@ -30,6 +30,10 @@ export interface VideoInfo {
   parseReason?: 'complete' | 'exhausted' | 'timeout'
 }
 
+/** A checked API result always carries the resource required by its media type. */
+export type ValidatedVideoInfo = VideoInfo &
+  ({ mediaType: 'video'; videoUrl: string } | { mediaType: 'image'; images: ImageAsset[] })
+
 export interface ApiError {
   code: string
   message: string

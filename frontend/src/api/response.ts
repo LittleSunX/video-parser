@@ -1,3 +1,4 @@
+import { validateVideoInfo, type VideoContractIssue } from '../../../shared/video-contract'
 import type { VideoInfo } from '../types/video'
 import { ParseError } from './parse-error'
 
@@ -42,50 +43,16 @@ export function readVideoPayload(payload: unknown, response: Response): VideoInf
   if (!response.ok || result.success !== true || !result.data || typeof result.data !== 'object') {
     throw new ParseError('HTTP_ERROR', httpMessage(response))
   }
-  const data = result.data as Record<string, unknown>
-  if (
-    typeof data.videoId !== 'string' ||
-    typeof data.title !== 'string' ||
-    typeof data.sourceUrl !== 'string' ||
-    typeof data.platform !== 'string' ||
-    !['douyin', 'kuaishou', 'xiaohongshu', 'tiktok', 'unknown'].includes(data.platform) ||
-    (data.mediaType !== 'video' && data.mediaType !== 'image') ||
-    (data.mediaType === 'video' && typeof data.videoUrl !== 'string') ||
-    (data.mediaType === 'image' &&
-      (!Array.isArray(data.images) ||
-        !data.images.every(
-          (image) => image && typeof image === 'object' && typeof image.url === 'string',
-        )))
-  ) {
-    throw new ParseError('INVALID_RESPONSE', '作品信息不完整，请重新解析')
+  const validation = validateVideoInfo(result.data)
+  if (!validation.valid) {
+    const messages: Record<VideoContractIssue, string> = {
+      resource: '作品信息不完整，请重新解析',
+      size: '视频大小信息异常，请重新解析',
+      completeness: '作品资源状态异常，请重新解析',
+      status: '作品解析状态异常，请重新解析',
+      metadata: '作品元信息格式异常，请重新解析',
+    }
+    throw new ParseError('INVALID_RESPONSE', messages[validation.issue])
   }
-  const images = data.images as VideoInfo['images']
-  if (
-    data.videoSize !== undefined &&
-    (data.mediaType !== 'video' ||
-      typeof data.videoSize !== 'number' ||
-      !Number.isSafeInteger(data.videoSize) ||
-      data.videoSize <= 0)
-  ) {
-    throw new ParseError('INVALID_RESPONSE', '视频大小信息异常，请重新解析')
-  }
-  if (
-    data.imagesComplete !== undefined &&
-    (typeof data.imagesComplete !== 'boolean' ||
-      data.mediaType !== 'image' ||
-      (data.imagesComplete && (!images?.length || !images.every((image) => image.url.trim()))))
-  ) {
-    throw new ParseError('INVALID_RESPONSE', '作品资源状态异常，请重新解析')
-  }
-  if (
-    (data.parseStatus !== undefined || data.parseReason !== undefined) &&
-    !(
-      (data.parseStatus === 'complete' && data.parseReason === 'complete') ||
-      (data.parseStatus === 'unverified' &&
-        (data.parseReason === 'timeout' || data.parseReason === 'exhausted'))
-    )
-  ) {
-    throw new ParseError('INVALID_RESPONSE', '作品解析状态异常，请重新解析')
-  }
-  return data as unknown as VideoInfo
+  return validation.value
 }
