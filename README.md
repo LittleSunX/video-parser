@@ -126,6 +126,8 @@ npm run dev:frontend
 
 **[开始部署：Nginx + Node →](VPS_DEPLOY.md)**
 
+完成首次配置后，可使用 [VPS 一键发布](guides/vps-one-click.md)，通过 GitHub 按钮或一条本地命令更新配套前后端。
+
 ### 方式三：Cloudflare Worker 后端与 VPS 前端
 
 解析和备用下载运行在 Cloudflare Worker，网页由 VPS 上的 Nginx 提供。教程从首次部署 Worker 开始；已有可用 Worker、仅迁移前端时可跳过后端发布。

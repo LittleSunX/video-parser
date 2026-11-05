@@ -339,6 +339,8 @@ npm run release:acceptance -- --worker https://example.com \
 
 ## 8. 更新、原子切换与回滚
 
+完成首次配置后，可按 [VPS 一键发布](guides/vps-one-click.md) 配置 GitHub 手动发布按钮或本地一条命令，替代下面的手动更新步骤。
+
 在已有构建仓库的根目录获取要发布的版本，不重新克隆。下面选择远端 `main` 的最新提交；需要指定版本时，将 `COMMIT` 改为该版本的完整 SHA：
 
 ```bash

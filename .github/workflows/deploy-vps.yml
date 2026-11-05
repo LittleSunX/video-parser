@@ -1,0 +1,78 @@
+name: Deploy VPS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-vps-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production-vps
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Prepare deployment configuration
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SITE: ${{ secrets.VPS_SITE }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { mkdir, chmod, writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+
+          for (const name of ['VPS_HOST', 'VPS_USER', 'VPS_SITE', 'VPS_SSH_PRIVATE_KEY', 'VPS_SSH_KNOWN_HOSTS']) {
+            if (!process.env[name]?.trim()) throw new Error('Missing deployment setting: ' + name);
+          }
+          const directory = join(process.env.RUNNER_TEMP, 'video-parser-vps-deploy');
+          await mkdir(directory, { recursive: true, mode: 0o700 });
+          await chmod(directory, 0o700);
+          const identityFile = join(directory, 'id_ed25519');
+          const knownHostsFile = join(directory, 'known_hosts');
+          const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\n*$/, '\n');
+          await writeFile(identityFile, normalize(process.env.VPS_SSH_PRIVATE_KEY), { mode: 0o600, flag: 'wx' });
+          await writeFile(knownHostsFile, normalize(process.env.VPS_SSH_KNOWN_HOSTS), { mode: 0o600, flag: 'wx' });
+          await writeFile(join(directory, 'config.json'), JSON.stringify({
+            host: process.env.VPS_HOST,
+            user: process.env.VPS_USER,
+            port: Number(process.env.VPS_PORT || '22'),
+            site: process.env.VPS_SITE,
+            identityFile,
+            knownHostsFile,
+          }), { mode: 0o600, flag: 'wx' });
+          NODE
+      - run: npm ci
+      - name: Build, upload and deploy the paired release
+        run: npm run deploy:vps -- --config "$RUNNER_TEMP/video-parser-vps-deploy/config.json" --deploy
+      - name: Remove temporary credentials
+        if: always()
+        run: |
+          node --input-type=module <<'NODE'
+          import { unlink } from 'node:fs/promises';
+          import { join } from 'node:path';
+
+          const directory = join(process.env.RUNNER_TEMP, 'video-parser-vps-deploy');
+          for (const name of ['id_ed25519', 'known_hosts', 'config.json']) {
+            await unlink(join(directory, name)).catch((error) => {
+              if (error.code !== 'ENOENT') throw error;
+            });
+          }
+          NODE
