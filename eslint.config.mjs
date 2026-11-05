@@ -28,7 +28,14 @@ export default ts.config(
     languageOptions: { globals: globals.worker },
   },
   {
-    files: ['tests/**/*.{js,mjs}', 'scripts/**/*.mjs', 'server/**/*.{ts,mjs}', '*.mjs', '*.ts'],
+    files: [
+      'tests/**/*.{js,mjs}',
+      'scripts/**/*.mjs',
+      'deploy/**/*.mjs',
+      'server/**/*.{ts,mjs}',
+      '*.mjs',
+      '*.ts',
+    ],
     languageOptions: { globals: globals.node },
   },
   {

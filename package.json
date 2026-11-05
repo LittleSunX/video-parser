@@ -20,6 +20,7 @@
     "check:worker": "node scripts/check-worker-build.mjs",
     "check:nginx": "node scripts/check-nginx.mjs",
     "deploy:worker": "node scripts/release-worker.mjs --deploy",
+    "deploy:vps": "node scripts/deploy-vps.mjs",
     "release:worker": "node scripts/release-worker.mjs",
     "release:check": "node scripts/check-release.mjs",
     "release:acceptance": "node scripts/acceptance.mjs",
