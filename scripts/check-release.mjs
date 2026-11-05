@@ -63,6 +63,7 @@ export async function checkRelease(
     frontendCommit = commit,
     workerCommit,
     apiCommit,
+    expectedNodeBuild,
     timeout = 15000,
     dryRun = false,
   },
@@ -109,7 +110,15 @@ export async function checkRelease(
   } finally {
     controller.abort()
   }
-  return compareVersions(bodies[0], bodies[1], expectedCommit, expectedWorkerCommit)
+  const result = compareVersions(bodies[0], bodies[1], expectedCommit, expectedWorkerCommit)
+  if (expectedNodeBuild) {
+    if (result.apiRuntime !== 'node' || result.apiVersion !== expectedNodeBuild.releaseId)
+      result.failures.push('公网 API 与本次发布的 Node 实例不一致')
+    if (bodies[0]?.builtAt !== expectedNodeBuild.frontendBuiltAt)
+      result.failures.push('公网前端与本次发布的构建时间不一致')
+    result.passed = result.failures.length === 0
+  }
+  return result
 }
 
 export async function main(args = process.argv.slice(2)) {

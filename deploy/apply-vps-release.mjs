@@ -14,6 +14,7 @@ export const archiveLimits = {
   extracted: 128 * 1024 * 1024,
   entries: 10_000,
 }
+export const rollbackExitCodes = { rolled_back: 72, rollback_failed: 73 }
 const sha = (value) => typeof value === 'string' && /^[a-f\d]{40}$/i.test(value)
 const uuid = (value) =>
   typeof value === 'string' && /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(value)
@@ -258,6 +259,15 @@ async function regularFile(path, maxSize) {
   }
 }
 
+export async function readReleaseArchive(path, commit, expectedChecksum) {
+  const archive = await regularFile(path, archiveLimits.compressed)
+  const sha256 = createHash('sha256').update(archive).digest('hex')
+  if (expectedChecksum !== undefined && sha256 !== expectedChecksum)
+    throw failure('压缩包 SHA256 校验失败', 'CHECKSUM_MISMATCH')
+  const entries = parseReleaseArchive(archive)
+  return { entries, versions: archiveVersions(entries, commit), sha256 }
+}
+
 async function installedVersions(directory) {
   for (const name of ['frontend', 'server']) {
     const info = await fs.lstat(join(directory, name))
@@ -462,7 +472,6 @@ async function verify(base, path, expected, deps, signal) {
 }
 
 async function materialize(entries, target) {
-  await fs.mkdir(target, { mode: 0o755 })
   await fs.chmod(target, 0o755)
   for (const [name, entry] of entries) {
     const destination = join(target, ...name.split('/'))
@@ -488,6 +497,17 @@ async function materialize(entries, target) {
   for (const path of directories) await fs.chmod(path, 0o755)
 }
 
+async function requireUnusedRelease(release) {
+  // The deployment lock serializes publishers. Preserve even an empty existing release.
+  try {
+    await fs.lstat(release)
+  } catch (error) {
+    if (error.code === 'ENOENT') return
+    throw error
+  }
+  throw failure('新 release 目录已存在；不会覆盖任何已有版本', 'RELEASE_EXISTS')
+}
+
 /** All preparatory work happens before stop; any later error restores the previous pair. */
 export async function applyRelease(args, overrides = {}) {
   const input = validateArguments(args)
@@ -510,6 +530,7 @@ export async function applyRelease(args, overrides = {}) {
   }
   const releaseLock = await lock(root)
   let record,
+    staging,
     mutationStarted = false
   try {
     let previous, old
@@ -524,19 +545,15 @@ export async function applyRelease(args, overrides = {}) {
       throw failure(onceInstalled, 'NOT_INSTALLED')
     }
     args.signal?.throwIfAborted()
-    const archive = await regularFile(input.archive, archiveLimits.compressed)
-    if (createHash('sha256').update(archive).digest('hex') !== input.sha256)
-      throw failure('压缩包 SHA256 校验失败', 'CHECKSUM_MISMATCH')
-    const entries = parseReleaseArchive(archive)
-    const next = archiveVersions(entries, input.commit)
+    const { entries, versions: next } = await readReleaseArchive(
+      input.archive,
+      input.commit,
+      input.sha256,
+    )
     const release = join(root, 'releases', next.server.id.toLowerCase())
-    try {
-      await materialize(entries, release)
-    } catch (error) {
-      if (error.code === 'EEXIST')
-        throw failure('新 release 目录已存在；不会覆盖任何已有版本', 'RELEASE_EXISTS')
-      throw error
-    }
+    await requireUnusedRelease(release)
+    staging = await fs.mkdtemp(join(dirname(release), '.staging-'))
+    await materialize(entries, staging)
     record = {
       transaction: randomUUID(),
       status: 'prepared',
@@ -553,6 +570,8 @@ export async function applyRelease(args, overrides = {}) {
     record.status = 'switching'
     await writeRecord(root, record)
     args.signal?.throwIfAborted()
+    await fs.rename(staging, release)
+    staging = undefined
     mutationStarted = true
     await deps.service.stop()
     args.signal?.throwIfAborted()
@@ -597,7 +616,11 @@ export async function applyRelease(args, overrides = {}) {
     }
     throw error
   } finally {
-    await releaseLock()
+    try {
+      if (staging) await fs.rm(staging, { recursive: true, force: true })
+    } finally {
+      await releaseLock()
+    }
   }
 }
 
@@ -656,6 +679,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
           : {}),
       }),
     )
-    process.exitCode = 1
+    process.exitCode = rollbackExitCodes[error.status] ?? 1
   })
 }
