@@ -12,6 +12,11 @@ import {
   validateArguments,
 } from '../deploy/apply-vps-release.mjs'
 
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original()
+  return { ...actual, writeFile: vi.fn(actual.writeFile) }
+})
+
 const directories = []
 const oldCommit = 'a'.repeat(40)
 const commit = 'b'.repeat(40)
@@ -353,6 +358,20 @@ test('an existing release is never overwritten', async () => {
   expect(f.service.stop).not.toHaveBeenCalled()
 })
 
+test('a partial write leaves the old pair online and the same archive can be retried', async () => {
+  const f = await fixture()
+  const releases = join(f.root, 'releases')
+  const write = fs.writeFile.getMockImplementation()
+  fs.writeFile
+    .mockImplementationOnce(write)
+    .mockRejectedValueOnce(Object.assign(new Error('disk full'), { code: 'ENOSPC' }))
+  await expect(applyRelease(f.args, f.deps)).rejects.toHaveProperty('code', 'ENOSPC')
+  expect(f.service.stop).not.toHaveBeenCalled()
+  expect(await fs.realpath(join(f.root, 'current'))).toBe(f.previous)
+  expect(await fs.readdir(releases)).toEqual([oldId])
+  await expect(applyRelease(f.args, f.deps)).resolves.toMatchObject({ passed: true, releaseId: id })
+})
+
 test.each([{ failNewStart: true }, { badPublicFrontend: true }, { badPublicApi: true }])(
   'startup or public version failure restores the previous pair and verifies old health: %j',
   async (options) => {
@@ -408,6 +427,7 @@ test('inability to persist rollback information aborts before stopping the old p
   await fs.writeFile(join(f.root, 'deployments'), 'operator file, do not overwrite')
   await expect(applyRelease(f.args, f.deps)).rejects.toMatchObject({ status: 'preflight_failed' })
   expect(f.service.stop).not.toHaveBeenCalled()
+  expect(await fs.readdir(join(f.root, 'releases'))).toEqual([oldId])
   expect(await fs.realpath(join(f.root, 'current'))).toBe(f.previous)
   expect(await fs.readFile(join(f.root, 'deployments'), 'utf8')).toBe(
     'operator file, do not overwrite',

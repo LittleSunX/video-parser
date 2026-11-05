@@ -4,6 +4,7 @@ import { cp, lstat, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promise
 import { isIP } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import { readReleaseArchive, rollbackExitCodes } from '../deploy/apply-vps-release.mjs'
 import { checkRelease } from './check-release.mjs'
 import {
   cli,
@@ -105,10 +106,9 @@ export function vpsDeploymentPlan(state, config, deploy = false) {
     mode: deploy ? 'deploy' : 'preview',
     commit,
     dirty: state.dirty,
-    host: config.host,
-    user: config.user,
-    port: config.port,
-    site: config.site,
+    ...(!deploy && process.env.GITHUB_ACTIONS !== 'true'
+      ? { host: config.host, user: config.user, port: config.port, site: config.site }
+      : {}),
     runtime: 'node',
     root: '/opt/video-parser',
     service: 'video-parser',
@@ -143,7 +143,7 @@ export async function inspectVpsArtifacts(root, expected) {
   for (const file of ['frontend/dist/index.html', 'server/dist/index.mjs']) {
     if (!(await stat(join(root, file))).size) throw new Error('Missing build artifact: ' + file)
   }
-  return { commit, releaseId: api.id }
+  return { commit, releaseId: api.id, frontendBuiltAt: front.builtAt }
 }
 
 async function validateTree(directory) {
@@ -174,7 +174,15 @@ export function runCommand(
   { cwd = repositoryRoot, env = process.env, timeout = 600_000 } = {},
 ) {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, args, { cwd, env, stdio: 'inherit', windowsHide: true })
+    // SSH diagnostics can include resolved IPs and normalized hostnames that a CI mask misses.
+    const privateTransport =
+      process.env.GITHUB_ACTIONS === 'true' && ['ssh', 'scp'].includes(binary)
+    const child = spawn(binary, args, {
+      cwd,
+      env,
+      stdio: privateTransport ? 'ignore' : 'inherit',
+      windowsHide: true,
+    })
     const timer = setTimeout(() => {
       child.kill()
       reject(new Error(`${basename(binary)} exceeded its deadline`))
@@ -186,7 +194,12 @@ export function runCommand(
     child.once('exit', (code) => {
       clearTimeout(timer)
       if (code === 0) resolve()
-      else reject(new Error(`${basename(binary)} failed (${code ?? 'signal'})`))
+      else
+        reject(
+          Object.assign(new Error(`${basename(binary)} failed (${code ?? 'signal'})`), {
+            exitCode: code,
+          }),
+        )
     })
   })
 }
@@ -213,7 +226,34 @@ async function cleanTemporary(directory) {
   await rm(path, { recursive: true, force: true })
 }
 
-export async function deployVps(config, state, run = runCommand) {
+async function prepareBundle(commit, temporary, bundleDirectory, run) {
+  if (bundleDirectory) {
+    const archive = resolve(bundleDirectory, 'release.tar.gz')
+    const { sha256, versions } = await readReleaseArchive(archive, commit)
+    return {
+      archive,
+      sha256,
+      releaseId: versions.server.id,
+      frontendBuiltAt: versions.frontend.builtAt,
+    }
+  }
+  if (process.env.GITHUB_ACTIONS === 'true')
+    throw new Error('Actions deployments require a release archive from the build job')
+  const npmCli = process.env.npm_execpath
+  if (!npmCli && process.platform === 'win32')
+    throw new Error('Run this command through npm run deploy:vps')
+  await run(
+    npmCli ? process.execPath : 'npm',
+    npmCli ? [npmCli, 'run', 'check'] : ['run', 'check'],
+    { env: vpsBuildEnvironment() },
+  )
+  const current = gitState()
+  if (current.commit !== commit || current.dirty)
+    throw new Error('Git source changed during the build; no files were uploaded')
+  return createVpsArchive(repositoryRoot, temporary, commit, run)
+}
+
+export async function deployVps(config, state, run = runCommand, bundleDirectory) {
   const plan = vpsDeploymentPlan(state, config, true)
   for (const path of [config.identityFile, config.knownHostsFile])
     if (!(await stat(path)).isFile()) throw new Error('Missing SSH key or trusted known_hosts file')
@@ -235,24 +275,11 @@ export async function deployVps(config, state, run = runCommand) {
       'VPS preflight failed: check SSH trust/key and the one-time Node/Nginx/systemd setup in guides/vps-one-click.md',
     )
   }
-  const npmCli = process.env.npm_execpath
-  if (!npmCli && process.platform === 'win32')
-    throw new Error('Run this command through npm run deploy:vps')
-  await run(
-    npmCli ? process.execPath : 'npm',
-    npmCli ? [npmCli, 'run', 'check'] : ['run', 'check'],
-    {
-      env: vpsBuildEnvironment(),
-    },
-  )
-  const current = gitState()
-  if (current.commit !== plan.commit || current.dirty)
-    throw new Error('Git source changed during the build; no files were uploaded')
   const temporary = await mkdtemp(join(tmpdir(), 'video-parser-vps-'))
   const remote = `video-parser-upload/${randomUUID()}`
   let uploaded = false
   try {
-    const bundle = await createVpsArchive(repositoryRoot, temporary, plan.commit, run)
+    const bundle = await prepareBundle(plan.commit, temporary, bundleDirectory, run)
     await run('ssh', [...ssh.args, ssh.target, `umask 077 && mkdir -p -- ${shellQuote(remote)}`], {
       timeout: 30_000,
     })
@@ -284,18 +311,30 @@ export async function deployVps(config, state, run = runCommand) {
       .join(' ')
     await run('ssh', [...ssh.args, ssh.target, `cd ${shellQuote(remote)} && ${command}`], {
       timeout: 600_000,
+    }).catch((error) => {
+      if (error.exitCode === rollbackExitCodes.rolled_back)
+        throw new Error('Deployment failed; previous release restored and checked')
+      if (error.exitCode === rollbackExitCodes.rollback_failed)
+        throw new Error(
+          'Automatic rollback failed; inspect the server deployment record immediately',
+        )
+      throw error
     })
     const verified = await checkRelease({
       frontend: config.site,
       api: config.site,
       commit: plan.commit,
+      expectedNodeBuild: bundle,
     })
-    report(verified)
     if (!verified.passed)
       throw new Error(
         'Server deployment finished, but external version verification failed; inspect the saved server release record',
       )
-    return { ...plan, passed: true, releaseId: bundle.releaseId }
+    return {
+      ...plan,
+      passed: true,
+      ...(process.env.GITHUB_ACTIONS === 'true' ? {} : { releaseId: bundle.releaseId }),
+    }
   } finally {
     if (uploaded) {
       const files = ['release.tar.gz', 'apply-vps-release.mjs'].map((file) =>
@@ -314,15 +353,21 @@ export async function deployVps(config, state, run = runCommand) {
 }
 
 export async function main(args = process.argv.slice(2)) {
-  const flags = options(args, { help: 'boolean', config: 'string', deploy: 'boolean' })
+  const flags = options(args, {
+    help: 'boolean',
+    config: 'string',
+    deploy: 'boolean',
+    bundle: 'string',
+  })
   if (flags.help) {
     console.log(
-      'Usage: npm run deploy:vps -- --config <local JSON file> [--deploy]\nWithout --deploy this only previews the target. First-time Node/Nginx/systemd and SSH setup are required; see guides/vps-one-click.md.',
+      'Usage: npm run deploy:vps -- --config <local JSON file> [--deploy [--bundle <directory with release.tar.gz>]]\nWithout --deploy this only previews the target. First-time Node/Nginx/systemd and SSH setup are required; see guides/vps-one-click.md.',
     )
     return
   }
   if (!flags.config)
     throw new Error('Provide a local VPS config with --config; see guides/vps-one-click.md')
+  if (flags.bundle && !flags.deploy) throw new Error('--bundle requires --deploy')
   const path = resolve(flags.config)
   const raw = await readJson(
     new Response(await readFile(path), { headers: { 'Content-Type': 'application/json' } }),
@@ -331,7 +376,7 @@ export async function main(args = process.argv.slice(2)) {
   const config = validateVpsConfig(raw, dirname(path))
   const state = gitState()
   report(vpsDeploymentPlan(state, config, flags.deploy))
-  if (flags.deploy) report(await deployVps(config, state))
+  if (flags.deploy) report(await deployVps(config, state, runCommand, flags.bundle))
 }
 
 if (isMain(import.meta.url)) await cli(() => main())

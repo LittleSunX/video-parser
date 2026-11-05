@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
 import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises'
@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { parseReleaseArchive } from '../deploy/apply-vps-release.mjs'
 import {
   createVpsArchive,
+  deployVps,
   inspectVpsArtifacts,
   shellQuote,
   sshConnection,
@@ -33,6 +34,8 @@ async function temporary() {
   return directory
 }
 afterEach(async () => {
+  vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
   for (const directory of directories.splice(0)) {
     const path = resolve(directory)
     if (dirname(path) !== resolve(tmpdir()) || !basename(path).startsWith('video-parser-vps-test-'))
@@ -175,6 +178,7 @@ test('CLI preview needs no SSH files or network and does not print rejected secr
   const script = fileURLToPath(new URL('../scripts/deploy-vps.mjs', import.meta.url))
   await writeFile(path, JSON.stringify(config))
   const preview = spawnSync(process.execPath, [script, '--config', path], {
+    env: { ...process.env, GITHUB_ACTIONS: 'false' },
     encoding: 'utf8',
     timeout: 15_000,
   })
@@ -192,3 +196,86 @@ test('CLI preview needs no SSH files or network and does not print rejected secr
   expect(rejected.status).toBe(1)
   expect(rejected.stdout + rejected.stderr).not.toContain('PRIVATE_SECRET')
 })
+
+test('Actions preview and failing SSH diagnostics do not print the normalized target', async () => {
+  const directory = await temporary()
+  const path = join(directory, 'config.json')
+  const script = new URL('../scripts/deploy-vps.mjs', import.meta.url)
+  const site = 'https://Private-Site.example/'
+  await writeFile(path, JSON.stringify({ ...config, site }))
+  const options = {
+    encoding: 'utf8',
+    timeout: 15_000,
+    env: { ...process.env, GITHUB_ACTIONS: 'true' },
+  }
+  const preview = spawnSync(process.execPath, [fileURLToPath(script), '--config', path], options)
+  expect(preview.status, preview.stderr).toBe(0)
+  const plan = JSON.parse(preview.stdout)
+  for (const field of ['site', 'host', 'user', 'port']) expect(plan).not.toHaveProperty(field)
+  // An invalid option makes OpenSSH print its input and exit before opening a connection.
+  const command = `import {runCommand} from ${JSON.stringify(script.href)}; await runCommand('ssh', ['-o', 'Private-Site.example=yes']).catch(e => { console.error(e.message); process.exitCode = 1 })`
+  const failure = spawnSync(process.execPath, ['--input-type=module', '-e', command], options)
+  expect(failure.status).toBe(1)
+  expect(failure.stderr).toContain('ssh failed')
+  expect(preview.stdout + preview.stderr + failure.stdout + failure.stderr).not.toMatch(
+    /private-site|vps\.example/i,
+  )
+})
+
+test.each([
+  ['this build', 'node', uuid, timestamp, true],
+  ['a Worker at the same commit', 'cloudflare-worker', uuid, timestamp, false],
+  [
+    'a previous Node build at the same commit',
+    'node',
+    '91111111-2222-4333-8444-555555555555',
+    timestamp,
+    false,
+  ],
+  ['a previous frontend at the same commit', 'node', uuid, '2026-11-04T00:00:00.000Z', false],
+])(
+  'Actions deploys the prebuilt archive and checks %s',
+  async (_, runtime, version, builtAt, passes) => {
+    vi.stubEnv('GITHUB_ACTIONS', 'true')
+    const root = await temporary()
+    await artifacts(root)
+    const bundleDir = await temporary()
+    const bundle = await createVpsArchive(root, bundleDir, commit)
+    const target = validateVpsConfig(config, root)
+    await writeFile(target.identityFile, 'fixture')
+    await writeFile(target.knownHostsFile, 'fixture')
+    vi.stubGlobal('fetch', async (url) =>
+      Response.json(
+        new URL(url).pathname === '/version.json'
+          ? { commit, builtAt }
+          : {
+              success: true,
+              data: {
+                service: 'video-parser-api',
+                status: 'ok',
+                runtime,
+                version,
+                versionTag: commit,
+                versionCreatedAt: timestamp,
+              },
+            },
+      ),
+    )
+    const run = vi.fn(async () => {})
+    const result = deployVps(target, { commit, dirty: false }, run, bundleDir)
+    if (passes) {
+      const report = await result
+      expect(report.passed).toBe(true)
+      for (const field of ['host', 'site', 'port', 'user', 'releaseId'])
+        expect(report).not.toHaveProperty(field)
+    } else {
+      await expect(result).rejects.toThrow('external version verification failed')
+    }
+    expect(run.mock.calls.map(([binary]) => binary)).toEqual(['ssh', 'ssh', 'scp', 'ssh', 'ssh'])
+    expect(run.mock.calls[2][1]).toContain(bundle.archive)
+    expect(run.mock.calls[2][1]).toContain(
+      fileURLToPath(new URL('../deploy/apply-vps-release.mjs', import.meta.url)),
+    )
+    expect(run.mock.calls[3][1].at(-1)).toContain(bundle.sha256)
+  },
+)

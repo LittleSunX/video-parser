@@ -11,10 +11,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  build:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+        env:
+          VITE_API_BASE_URL: /
+      - name: Package the checked frontend and Node build
+        run: |
+          node --input-type=module <<'NODE'
+          import { join } from 'node:path';
+          import { createVpsArchive } from './scripts/deploy-vps.mjs';
+          import { gitState } from './scripts/release-utils.mjs';
+          const { commit, dirty } = gitState();
+          if (dirty || commit !== process.env.GITHUB_SHA) throw new Error('Git source changed during the build');
+          await createVpsArchive(process.cwd(), join(process.env.RUNNER_TEMP, 'vps-build'), commit);
+          NODE
+      - uses: actions/upload-artifact@v7
+        id: upload
+        with:
+          name: vps-release-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vps-build/release.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment:
       name: production-vps
     steps:
@@ -25,7 +63,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: ${{ runner.temp }}/vps-bundle
+          digest-mismatch: error
       - name: Prepare deployment configuration
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -59,9 +101,8 @@ jobs:
             knownHostsFile,
           }), { mode: 0o600, flag: 'wx' });
           NODE
-      - run: npm ci
-      - name: Build, upload and deploy the paired release
-        run: npm run deploy:vps -- --config "$RUNNER_TEMP/video-parser-vps-deploy/config.json" --deploy
+      - name: Deploy and verify the paired release
+        run: node scripts/deploy-vps.mjs --config "$RUNNER_TEMP/video-parser-vps-deploy/config.json" --deploy --bundle "$RUNNER_TEMP/vps-bundle"
       - name: Remove temporary credentials
         if: always()
         run: |
