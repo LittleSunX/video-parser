@@ -4,7 +4,7 @@
 
 粘贴抖音分享链接，在浏览器中保存视频、图集、实况动态与背景音乐。
 
-[在线体验](https://wind-video.ccwu.cc/) · [快速开始](#本地运行) · [部署指南](#部署) · [问题反馈](https://github.com/LittleSunX/video-parser/issues)
+[在线体验](https://wind-video.ccwu.cc/) · [界面预览](#界面预览) · [快速开始](#本地运行) · [部署指南](#部署) · [问题反馈](https://github.com/LittleSunX/video-parser/issues)
 
 [![Quality checks](https://github.com/LittleSunX/video-parser/actions/workflows/check.yml/badge.svg)](https://github.com/LittleSunX/video-parser/actions/workflows/check.yml)
 ![Vue 3](https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white)
@@ -37,6 +37,27 @@ Video Parser 是一个支持自行部署的网页下载工具。前端使用 Vue
 3. 确认预览内容，选择视频、图片、动态轨或音乐进行保存。
 
 批量下载会生成 ZIP，每包媒体内容最多 32 MiB；较大的作品按页面提示逐包保存。浏览器接管下载后，请到下载列表确认结果。
+
+### 界面预览
+
+**桌面端 · 实况图文**
+
+解析后可浏览大图、切换缩略图或总览；单项保存使用图片下方的入口，整组保存可选择“保留动态”或“仅存原图”，再点击“打包下载全部”。
+
+截图作品：[三星为目，照见古今。](https://v.douyin.com/drnDHTvhhio/)（少司缘 / 三星堆实况图文）。
+
+![桌面端实况图文界面：左侧为大图、单项保存与缩略图，右侧为下载格式切换、整组打包和背景音乐入口](guides/assets/screenshots/desktop-gallery.png)
+
+<details>
+<summary>查看手机端视频下载界面</summary>
+
+手机端可通过页面下载按钮或底部快捷栏保存视频；下载选项中也提供封面、复制视频地址和备用下载入口。
+
+截图作品：[可食用芋头的第五人格女王蜂视频](https://v.douyin.com/jGYv7ZnHTHQ/)。
+
+<img src="guides/assets/screenshots/mobile-video.png" alt="手机端视频解析结果：封面预览、作品信息与底部下载选项和下载视频按钮" width="390" />
+
+</details>
 
 <a id="quick-start"></a>
 
