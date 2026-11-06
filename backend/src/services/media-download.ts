@@ -1,4 +1,5 @@
 import { AppError } from '../errors/app-error'
+import { validateFullMediaRange } from '../../../shared/media-response'
 
 const MEDIA_HOST_SUFFIXES = [
   'douyinvod.com',
@@ -105,8 +106,15 @@ export async function fetchMedia(
       throw new AppError('MEDIA_UNAVAILABLE', '上游返回的内容不是媒体文件', 422)
     }
     if (!upstream.body) throw new AppError('DOWNLOAD_FAILED', '媒体响应为空', 502)
+    const fullRange = range ? undefined : validateFullMediaRange(upstream)
+    if (fullRange?.valid === false) throw new AppError('DOWNLOAD_FAILED', '媒体响应不完整', 502)
     clearTimeout(timer)
-    const body = guardMediaStream(upstream.body, controller, cleanup)
+    const body = guardMediaStream(
+      upstream.body,
+      controller,
+      cleanup,
+      fullRange?.valid ? fullRange.length : undefined,
+    )
     return new Response(body, { status: upstream.status, headers: upstream.headers })
   } catch (error) {
     cleanup()
@@ -122,9 +130,11 @@ function guardMediaStream(
   body: ReadableStream<Uint8Array>,
   abortController: AbortController,
   cleanup: () => void,
+  expectedLength?: number,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader()
   let ended = false
+  let received = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   let output: ReadableStreamDefaultController<Uint8Array>
   const finish = () => {
@@ -163,10 +173,17 @@ function guardMediaStream(
         clearTimeout(timer)
         if (ended) return
         if (done) {
+          if (expectedLength !== undefined && received !== expectedLength)
+            throw new AppError('DOWNLOAD_FAILED', '媒体响应不完整', 502)
           finish()
           reader.releaseLock()
           controller.close()
-        } else controller.enqueue(value)
+        } else {
+          received += value.byteLength
+          if (expectedLength !== undefined && received > expectedLength)
+            throw new AppError('DOWNLOAD_FAILED', '媒体响应超出声明范围', 502)
+          controller.enqueue(value)
+        }
       } catch {
         if (!ended)
           abortController.abort(new AppError('DOWNLOAD_NETWORK_ERROR', '媒体传输中断', 502))

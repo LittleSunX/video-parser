@@ -1,6 +1,10 @@
-import { MediaDownloadError, responseDownloadError } from './download-error'
+import { canRetryDirectSource, MediaDownloadError, responseDownloadError } from './download-error'
+import { validateFullMediaRange } from '../../../shared/media-response'
 import { SINGLE_BUFFER_BYTES, VIDEO_BUFFER_BYTES } from './download-buffer'
 import { MAX_VIDEO_URL_ALTERNATIVES } from '../../../shared/video'
+
+const incompleteMedia = () =>
+  new MediaDownloadError('INVALID_MEDIA', '媒体响应不完整，请重新下载或重新解析')
 
 interface DownloadOptions {
   signal: AbortSignal
@@ -38,9 +42,7 @@ export async function fetchMediaBlob(
       blob = await fetchSingleMediaBlob(candidate, options, kind, maxBytes)
     } catch (error) {
       options.signal.throwIfAborted()
-      // 这些失败与同一文件的节点无关，避免重复传输或增加上游请求。
-      if (!(error instanceof MediaDownloadError) || ['TOO_LARGE', 'BUSY'].includes(error.code))
-        throw error
+      if (!canRetryDirectSource(error)) throw error
       lastError = error
       continue
     }
@@ -110,6 +112,9 @@ async function fetchSingleMediaBlob(
     controller.signal.throwIfAborted()
     if (!response.ok) throw responseDownloadError(response.status)
     if (!response.body) throw new MediaDownloadError('INVALID_MEDIA', '媒体内容为空')
+    const range = validateFullMediaRange(response)
+    if (!range.valid) throw incompleteMedia()
+    const rangeLength = range.length
     const contentType = response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase()
     if (
       contentType &&
@@ -119,7 +124,7 @@ async function fetchSingleMediaBlob(
       throw new MediaDownloadError('INVALID_MEDIA', '链接没有返回预期的媒体文件，请重新解析')
     }
     const length = Number(response.headers.get('Content-Length'))
-    const total = Number.isFinite(length) && length > 0 ? length : undefined
+    const total = rangeLength ?? (Number.isFinite(length) && length > 0 ? length : undefined)
     if (beforeRead) maxBytes = Math.min(maxBytes, beforeRead(total))
     if (total && total > maxBytes)
       throw new MediaDownloadError('TOO_LARGE', '文件超过当前打包上限，请逐项下载')
@@ -134,10 +139,12 @@ async function fetchSingleMediaBlob(
       received += value.byteLength
       if (received > maxBytes)
         throw new MediaDownloadError('TOO_LARGE', '文件超过当前打包上限，请逐项下载')
+      if (rangeLength !== undefined && received > rangeLength) throw incompleteMedia()
       chunks.push(new Uint8Array(value).buffer)
       onProgress(received, total)
     }
     if (!received) throw new MediaDownloadError('INVALID_MEDIA', '媒体内容为空，请重新解析')
+    if (rangeLength !== undefined && received !== rangeLength) throw incompleteMedia()
     signal.throwIfAborted()
     return new Blob(chunks, { type: contentType || 'application/octet-stream' })
   } catch (error) {

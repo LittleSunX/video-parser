@@ -602,6 +602,33 @@ describe('shared core over real Node HTTP with an offline deterministic upstream
     expect(blockedFetches).toEqual([]) // Core rejected it; the test network guard did not.
   })
 
+  test('a full download refuses an unsolicited partial 206 instead of serving an attachment', async () => {
+    upstream = (_request, response) => {
+      response.writeHead(206, {
+        'Content-Type': 'video/mp4',
+        'Content-Range': 'bytes 0-3/100',
+      })
+      response.end(Buffer.from([1, 2, 3, 4]))
+    }
+    const response = await nativeFetch(origin + downloadPath())
+    expect(response.status).toBe(502)
+    expect(response.headers.has('content-disposition')).toBe(false)
+    expect((await response.json()).error.code).toBe('DOWNLOAD_FAILED')
+  })
+
+  test('a short full-range body aborts the real HTTP response instead of completing silently', async () => {
+    upstream = (_request, response) => {
+      response.writeHead(206, {
+        'Content-Type': 'video/mp4',
+        'Content-Range': 'bytes 0-3/4',
+      })
+      response.end(Buffer.from([1, 2]))
+    }
+    await expect(
+      nativeFetch(origin + downloadPath()).then((response) => response.arrayBuffer()),
+    ).rejects.toThrow()
+  })
+
   test('an allowlisted media redirect preserves Range and identity on both real HTTP hops', async () => {
     const bytes = Buffer.from([0, 128, 255, 1])
     upstream = (request, response) => {
