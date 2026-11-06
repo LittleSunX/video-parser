@@ -122,7 +122,7 @@ async function handleDownload(
       throw new AppError('INVALID_URL', '下载地址格式不正确')
     }
 
-    const upstream = await fetchMedia(mediaUrl, request.headers.get('Range'), request.signal)
+    const upstream = await fetchMedia(mediaUrl, request.headers.get('Range'), request.signal, trace)
 
     const headers = new Headers()
     const contentType = upstream.headers.get('Content-Type')

@@ -427,6 +427,7 @@ test('diagnostic serialization rejects arbitrary fields and dynamic labels', () 
   expect(recordsFrom(logs)).toEqual([
     {
       event: 'unknown_event',
+      timestamp: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/),
       requestId: trace.requestId,
       version: 'unknown',
       attempt: 3,

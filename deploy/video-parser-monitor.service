@@ -1,0 +1,26 @@
+[Unit]
+Description=Video Parser health and diagnostic monitor
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+SupplementaryGroups=systemd-journal
+StateDirectory=video-parser-monitor
+StateDirectoryMode=0700
+RuntimeDirectory=video-parser-monitor
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/node /opt/video-parser/monitor/monitor.mjs --config /etc/video-parser/monitor.json --state-dir /var/lib/video-parser-monitor --lock-dir /run/video-parser-monitor --journal-namespace video-parser
+TimeoutStartSec=45s
+MemoryMax=384M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+LogNamespace=video-parser
+SyslogIdentifier=video-parser-monitor

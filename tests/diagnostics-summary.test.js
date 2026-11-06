@@ -55,6 +55,7 @@ test('interleaved stream headers, final outcomes and duplicate attempts are corr
     failed: 1,
     cancelled: 1,
     unfinished: 1,
+    serverErrors: 1,
     successRate: 2 / 3,
     firstUsableMs: { samples: 2, p50: 10, p95: 30 },
     finalMs: { samples: 3, p50: 500, p95: 1000 },

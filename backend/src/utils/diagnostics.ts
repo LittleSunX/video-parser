@@ -31,6 +31,8 @@ interface DiagnosticFields {
   hasAuthor?: boolean
   hasCover?: boolean
   hasMusic?: boolean
+  bytes?: number
+  rangeRequest?: boolean
 }
 
 export type UpstreamStrategy = 'web-detail' | 'mobile-feed' | 'mobile-ssr' | 'page-meta'
@@ -74,6 +76,7 @@ const DIAGNOSTIC_EVENTS = new Set([
   'parse_first_usable',
   'upstream_attempt',
   'parse_stream_complete',
+  'download_transfer',
 ])
 const UPSTREAM_STRATEGIES = new Set(['web-detail', 'mobile-feed', 'mobile-ssr', 'page-meta'])
 const UPSTREAM_ENDPOINTS = new Set([
@@ -232,11 +235,18 @@ function safeFields(fields: DiagnosticFields): DiagnosticFields {
     'livePhotos',
     'videos',
     'watermarkFreeImages',
+    'bytes',
   ] as const) {
     const value = fields[name]
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0) safe[name] = value
   }
-  for (const name of ['imagesComplete', 'hasAuthor', 'hasCover', 'hasMusic'] as const)
+  for (const name of [
+    'imagesComplete',
+    'hasAuthor',
+    'hasCover',
+    'hasMusic',
+    'rangeRequest',
+  ] as const)
     if (typeof fields[name] === 'boolean') safe[name] = fields[name]
   if (fields.operation && ['parse', 'download', 'other'].includes(fields.operation))
     safe.operation = fields.operation
@@ -291,7 +301,14 @@ export function createDiagnostics(metadata?: VersionMetadata): Diagnostics {
       }
       // 仅传入固定事件及计数；禁止记录请求 URL、作品信息和原始异常。
       console.info(
-        JSON.stringify({ event, requestId, version, runtime: metadata?.runtime, ...fields }),
+        JSON.stringify({
+          event,
+          requestId,
+          version,
+          runtime: metadata?.runtime,
+          timestamp: new Date().toISOString(),
+          ...fields,
+        }),
       )
     },
     serverTiming() {

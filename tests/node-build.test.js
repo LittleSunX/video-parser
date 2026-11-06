@@ -80,7 +80,7 @@ async function stop(app) {
   return app.exit
 }
 
-test('build emits one standalone ESM bundle and a strict immutable build identity', async () => {
+test('build emits standalone API and monitor bundles with an immutable API identity', async () => {
   const version = JSON.parse(await readFile(join(dir, 'version.json'), 'utf8'))
   expect(version).toEqual({
     runtime: 'node',
@@ -93,10 +93,51 @@ test('build emits one standalone ESM bundle and a strict immutable build identit
   const imports = Object.values(output.metafile.outputs).flatMap((file) => file.imports)
   expect(imports.every((item) => item.external && allowed.has(item.path))).toBe(true)
   expect(await readFile(join(dir, 'index.mjs'), 'utf8')).not.toContain('cloudflare:')
+  const monitorHelp = execFileSync(process.execPath, [join(dir, 'monitor.mjs'), '--help'], {
+    cwd: dir,
+    encoding: 'utf8',
+  })
+  expect(monitorHelp).toContain('--state-dir')
+  expect(monitorHelp.match(/Usage:/g)).toHaveLength(1)
   const { buildServer } = await import('../server/build.mjs')
   const next = await buildServer({ outdir: join(dir, 'next') })
   expect(next.version.id).not.toBe(version.id)
   expect(next.version.tag).toBe(version.tag)
+})
+
+test('bundled monitor samples the running API and writes one private snapshot without node_modules', async () => {
+  const app = await launch()
+  try {
+    const result = await health(app)
+    const config = join(dir, 'monitor-config.json')
+    const logs = join(dir, 'monitor-fixture.ndjson')
+    const state = join(dir, 'monitor-state')
+    await writeFile(config, JSON.stringify({ healthUrl: app.url + '/api/health' }))
+    await writeFile(
+      logs,
+      JSON.stringify({
+        event: 'parse_selection',
+        requestId: '00000000-0000-4000-8000-000000000001',
+        timestamp: new Date().toISOString(),
+        runtime: 'node',
+        version: result.data.version,
+        outcome: 'success',
+        reason: 'complete',
+        sinceRequestMs: 100,
+      }),
+    )
+    const output = execFileSync(
+      process.execPath,
+      [join(dir, 'monitor.mjs'), '--config', config, '--state-dir', state, '--log-file', logs],
+      { cwd: dir, encoding: 'utf8' },
+    )
+    const report = JSON.parse(output)
+    expect(report.health).toMatchObject({ ok: true, version: result.data.version })
+    expect(report.logs.versions[result.data.version].parse.complete).toBe(1)
+    expect(JSON.parse(await readFile(join(state, 'latest.json'), 'utf8')).report).toEqual(report)
+  } finally {
+    await stop(app)
+  }
 })
 
 test('bundled CLI runs without node_modules, survives cwd changes and keeps version across restarts', async () => {

@@ -1,0 +1,12 @@
+{
+  "healthUrl": "http://127.0.0.1:8787/api/health",
+  "unit": "video-parser.service",
+  "windowSeconds": 600,
+  "minSamples": 20,
+  "failureRate": 0.2,
+  "parseP95Ms": 15000,
+  "upstreamFailureRate": 0.5,
+  "consecutiveFailures": 2,
+  "consecutiveRecoveries": 2,
+  "reminderSeconds": 1800
+}

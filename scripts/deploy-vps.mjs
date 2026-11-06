@@ -5,6 +5,7 @@ import { isIP } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { readReleaseArchive, rollbackExitCodes } from '../deploy/apply-vps-release.mjs'
+import { monitoringAssets } from '../deploy/install-vps-monitoring.mjs'
 import { checkRelease } from './check-release.mjs'
 import {
   cli,
@@ -212,8 +213,25 @@ export async function createVpsArchive(root, directory, commit, run = runCommand
   await cp(join(root, 'frontend/dist'), join(stage, 'frontend'), { recursive: true })
   await cp(join(root, 'server/dist/index.mjs'), join(stage, 'server/index.mjs'))
   await cp(join(root, 'server/dist/version.json'), join(stage, 'server/version.json'))
+  // The reader accepts old archives, but every newly built package must include monitoring.
+  await cp(join(root, 'server/dist/monitor.mjs'), join(stage, 'server/monitor.mjs'))
+  for (const name of monitoringAssets) {
+    const source = join(root, 'deploy', name)
+    const info = await lstat(source)
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error('Invalid monitoring template')
+    await cp(source, join(stage, 'operations', name))
+  }
   const archive = join(directory, 'release.tar.gz')
-  await run('tar', ['--format=ustar', '-czf', archive, '-C', stage, 'frontend', 'server'])
+  await run('tar', [
+    '--format=ustar',
+    '-czf',
+    archive,
+    '-C',
+    stage,
+    'frontend',
+    'server',
+    'operations',
+  ])
   const data = await readFile(archive)
   if (data.byteLength > 64 * 1024 * 1024) throw new Error('Compressed release exceeds 64 MiB')
   return { ...metadata, archive, sha256: createHash('sha256').update(data).digest('hex') }
@@ -290,6 +308,7 @@ export async function deployVps(config, state, run = runCommand, bundleDirectory
         ...scp.args,
         bundle.archive,
         join(repositoryRoot, 'deploy/apply-vps-release.mjs'),
+        join(repositoryRoot, 'deploy/install-vps-monitoring.mjs'),
         `${scp.target}:${remote}/`,
       ],
       { timeout: 120_000 },

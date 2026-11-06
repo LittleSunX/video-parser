@@ -1,0 +1,11 @@
+[Unit]
+Description=Sample Video Parser health and diagnostics every minute
+
+[Timer]
+OnBootSec=90s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+Unit=video-parser-monitor.service
+
+[Install]
+WantedBy=timers.target
