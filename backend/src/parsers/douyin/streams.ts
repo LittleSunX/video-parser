@@ -1,7 +1,9 @@
-import { extractFirstUrl, readNumber } from './text'
+import { MAX_VIDEO_URL_ALTERNATIVES } from '../../../../shared/video'
+import { extractFirstUrl, extractHttpsUrls, readNumber } from './text'
 
 export interface VideoStreamCandidate {
   url: string
+  urlAlternatives?: string[]
   width: number
   height: number
   pixels: number
@@ -42,6 +44,9 @@ export function toVideoStreamCandidate(input: unknown): VideoStreamCandidate | u
   if (!url) {
     return undefined
   }
+  const urlAlternatives = extractHttpsUrls(entry.play_addr, MAX_VIDEO_URL_ALTERNATIVES + 1)
+    .filter((candidate) => candidate !== url)
+    .slice(0, MAX_VIDEO_URL_ALTERNATIVES)
 
   const width = readNumber(playAddr?.width) || readNumber(entry.width)
   const height = readNumber(playAddr?.height) || readNumber(entry.height)
@@ -61,6 +66,7 @@ export function toVideoStreamCandidate(input: unknown): VideoStreamCandidate | u
 
   return {
     url,
+    ...(urlAlternatives.length ? { urlAlternatives } : {}),
     width,
     height,
     pixels: width > 0 && height > 0 ? width * height : 0,

@@ -32,6 +32,25 @@ export function extractFirstUrl(input: unknown): string | undefined {
   return undefined
 }
 
+/** Collect a bounded set of existing HTTPS alternatives without changing signed addresses. */
+export function extractHttpsUrls(input: unknown, limit: number): string[] {
+  const urls = new Set<string>()
+  function collect(value: unknown): void {
+    if (urls.size >= limit) return
+    if (typeof value === 'string') {
+      const url = normalizeUrl(value)
+      if (/^https:\/\//i.test(url)) urls.add(url)
+    } else if (Array.isArray(value)) {
+      for (const item of value) collect(item)
+    } else if (value && typeof value === 'object') {
+      const object = value as Record<string, unknown>
+      for (const key of ['url_list', 'urlList', 'url', 'src']) collect(object[key])
+    }
+  }
+  collect(input)
+  return [...urls]
+}
+
 export function toPlayableUrl(url: string): string {
   return url
     .replace('/playwm/', '/play/')

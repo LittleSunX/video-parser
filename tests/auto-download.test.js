@@ -119,6 +119,104 @@ test('a successful audio stream preserves bytes, progress and the ordinary CORS 
   expect(vi.getTimerCount()).toBe(0)
 })
 
+test('a failed partial primary is discarded before reading a complete direct mirror', async () => {
+  const mirror = 'https://v11.douyinvod.com/video.mp4?signature=a%2Fb'
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array([9]))
+          },
+          pull(controller) {
+            controller.error(new Error('connection failed'))
+          },
+        }),
+        { headers: { 'Content-Type': 'video/mp4' } },
+      ),
+    )
+    .mockResolvedValueOnce(
+      new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'video/mp4' } }),
+    )
+  vi.stubGlobal('fetch', fetch)
+  const blob = await fetchMediaBlob(url, {
+    signal: new AbortController().signal,
+    alternativeUrls: [mirror],
+    onProgress: vi.fn(),
+  })
+  expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([1, 2, 3])
+  expect(fetch.mock.calls.map(([address]) => address)).toEqual([url, mirror])
+  expect(fetch.mock.calls[0][1].signal.aborted).toBe(true)
+})
+
+test.each([
+  [
+    'size',
+    200,
+    { 'Content-Type': 'video/mp4', 'Content-Length': String(VIDEO_BUFFER_BYTES + 1) },
+    'TOO_LARGE',
+  ],
+  ['busy', 429, {}, 'BUSY'],
+])(
+  'a %s failure does not repeat the transfer through direct mirrors',
+  async (_, status, headers, code) => {
+    const fetch = vi.fn(async () => new Response(new Uint8Array([1]), { status, headers }))
+    vi.stubGlobal('fetch', fetch)
+    await expect(
+      fetchMediaBlob(url, {
+        signal: new AbortController().signal,
+        alternativeUrls: ['https://v11.douyinvod.com/video.mp4'],
+        onProgress: vi.fn(),
+      }),
+    ).rejects.toHaveProperty('code', code)
+    expect(fetch).toHaveBeenCalledOnce()
+  },
+)
+
+test('direct attempts are bounded and never rewrite or duplicate the supplied HTTPS mirrors', async () => {
+  const first = 'https://v11.douyinvod.com/video.mp4?signature=a%2Fb'
+  const second = 'https://v12.douyinvod.com/video.mp4?signature=c%2Fd'
+  const fetch = vi.fn(async () => new Response('Forbidden', { status: 403 }))
+  vi.stubGlobal('fetch', fetch)
+  await expect(
+    fetchMediaBlob(url, {
+      signal: new AbortController().signal,
+      alternativeUrls: [
+        url,
+        'http://v11.douyinvod.com/insecure.mp4',
+        first,
+        first,
+        second,
+        'https://v13.douyinvod.com/unused.mp4',
+      ],
+      onProgress: vi.fn(),
+    }),
+  ).rejects.toHaveProperty('status', 403)
+  expect(fetch.mock.calls.map(([address]) => address)).toEqual([url, first, second])
+})
+
+test('only a fully received source becomes reusable; failed attempts never become selected', async () => {
+  const alternative = 'https://v11.douyinvod.com/video.mp4?signature=a%2Fb'
+  const onSourceReady = vi.fn()
+  const fetch = vi.fn(async (candidate) => {
+    expect(onSourceReady).not.toHaveBeenCalled()
+    return candidate === url
+      ? new Response('Forbidden', { status: 403 })
+      : new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'audio/mpeg' } })
+  })
+  vi.stubGlobal('fetch', fetch)
+  await download({ alternativeUrls: [alternative], onSourceReady })
+  expect(onSourceReady).toHaveBeenCalledExactlyOnceWith(alternative)
+  onSourceReady.mockClear()
+  fetch.mockImplementation(async () => new Response('Forbidden', { status: 403 }))
+  await expect(download({ alternativeUrls: [alternative], onSourceReady })).rejects.toHaveProperty(
+    'status',
+    403,
+  )
+  expect(onSourceReady).not.toHaveBeenCalled()
+})
+
 test('the response deadline rejects even if fetch never responds to abort', async () => {
   vi.useFakeTimers()
   const fetch = vi.fn(() => new Promise(() => {}))

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, devices } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { unzipSync } from 'fflate'
@@ -108,6 +108,120 @@ test('failed direct request falls back to a browser attachment', async ({ page }
   expect(calls.proxy).toEqual([video().videoUrl])
   await expect(page.getByRole('region', { name: '下载任务' })).toContainText('备用下载')
   expect(calls.unexpected).toEqual([])
+})
+
+test('a denied primary uses the same-quality direct mirror without a proxy request', async ({
+  page,
+}) => {
+  const primary = video()
+  const alternative = media('same-quality.mp4')
+  const calls = await setup(page, {
+    result: { ...primary, videoUrlAlternatives: [alternative] },
+    direct: (route, url) =>
+      route.request().resourceType() === 'document'
+        ? route.fulfill({ body: 'Opened direct link', contentType: 'text/html' })
+        : route.fulfill({
+            status: url.pathname === '/same-quality.mp4' ? 200 : 403,
+            body: url.pathname === '/same-quality.mp4' ? videoBytes : 'Forbidden',
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+              'Content-Type': url.pathname === '/same-quality.mp4' ? 'video/mp4' : 'text/html',
+            },
+          }),
+  })
+  await parse(page)
+  const file = await download(page, page.getByRole('button', { name: '下载视频', exact: true }))
+  expect(file.bytes).toEqual(videoBytes)
+  expect(file.name).toContain(primary.videoId)
+  expect(calls.direct).toEqual(['/123456789.mp4', '/same-quality.mp4'])
+  expect(calls.proxy).toEqual([])
+  expect(calls.unexpected).toEqual([])
+  await page.getByText('备用下载与直链', { exact: true }).click()
+  await expect(page.getByRole('button', { name: '切换直链（2/2）', exact: true })).toBeVisible()
+  const opened = page.waitForEvent('popup')
+  await page.getByRole('button', { name: '打开直链', exact: true }).click()
+  const popup = await opened
+  await expect(popup).toHaveURL(alternative)
+  await popup.close()
+})
+
+test('manual direct link selection controls the next download and resets after parsing again', async ({
+  page,
+}) => {
+  const calls = await setup(page, {
+    result: (request) => {
+      const current = video(new URLSearchParams(request.postData()).get('url').split('/').at(-1))
+      return { ...current, videoUrlAlternatives: [media('same-quality.mp4')] }
+    },
+  })
+  await parse(page)
+  await page.getByText('备用下载与直链', { exact: true }).click()
+  await page.getByRole('button', { name: '切换直链（1/2）', exact: true }).click()
+  const file = await download(page, page.getByRole('button', { name: '下载视频', exact: true }))
+  expect(file.bytes).toEqual(videoBytes)
+  expect(calls.direct).toEqual(['/same-quality.mp4'])
+  expect(calls.proxy).toEqual([])
+  await parse(page, '987654321')
+  await page.getByText('备用下载与直链', { exact: true }).click()
+  await expect(page.getByRole('button', { name: '切换直链（1/2）', exact: true })).toBeVisible()
+  await download(page, page.getByRole('button', { name: '下载视频', exact: true }))
+  expect(calls.direct).toEqual(['/same-quality.mp4', '/987654321.mp4'])
+})
+
+test('exhausted direct mirrors launch only one proxy request with the refusal reason', async ({
+  page,
+}) => {
+  const calls = await setup(page, {
+    result: { ...video(), videoUrlAlternatives: [media('same-quality.mp4')] },
+    direct: (route) =>
+      route.fulfill({
+        status: 403,
+        body: 'Forbidden',
+        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'text/html' },
+      }),
+  })
+  await parse(page)
+  const file = await download(page, page.getByRole('button', { name: '下载视频', exact: true }))
+  expect(file.bytes).toEqual(videoBytes)
+  expect(calls.direct).toEqual(['/123456789.mp4', '/same-quality.mp4'])
+  expect(calls.proxy).toEqual([video().videoUrl])
+  await expect(page.getByRole('region', { name: '下载任务' })).toContainText('HTTP 403')
+})
+
+test.describe('Android download entry', () => {
+  test.use({
+    viewport: devices['Pixel 7'].viewport,
+    userAgent: devices['Pixel 7'].userAgent,
+    isMobile: true,
+    hasTouch: true,
+  })
+
+  test('the mobile action saves the direct mirror after the primary is denied', async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'chromium', 'Android Chrome uses Chromium')
+    const calls = await setup(page, {
+      result: { ...video(), videoUrlAlternatives: [media('same-quality.mp4')] },
+      direct: (route, url) =>
+        route.fulfill({
+          status: url.pathname === '/same-quality.mp4' ? 200 : 403,
+          body: url.pathname === '/same-quality.mp4' ? videoBytes : 'Forbidden',
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Content-Type': url.pathname === '/same-quality.mp4' ? 'video/mp4' : 'text/html',
+          },
+        }),
+    })
+    await parse(page)
+    const action = page
+      .getByRole('region', { name: '快捷下载' })
+      .getByRole('button', { name: '下载视频', exact: true })
+    const file = await download(page, action)
+    expect(file.bytes).toEqual(videoBytes)
+    expect(calls.direct).toEqual(['/123456789.mp4', '/same-quality.mp4'])
+    expect(calls.proxy).toEqual([])
+  })
 })
 
 test('cancelled download releases the UI and a fresh download can finish', async ({ page }) => {
