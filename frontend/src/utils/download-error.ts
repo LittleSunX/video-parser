@@ -22,6 +22,23 @@ export function responseDownloadError(status: number): MediaDownloadError {
   return new MediaDownloadError('NETWORK', '下载连接失败，请检查网络后重试', status)
 }
 
+/** 重试仅限已提供的同文件直链；限流、容量上限和未知异常直接结束。 */
+export function canRetryDirectSource(error: unknown): boolean {
+  if (!(error instanceof MediaDownloadError)) return false
+  switch (error.code) {
+    case 'NETWORK':
+    case 'TIMEOUT':
+    case 'EXPIRED':
+    case 'INVALID_MEDIA':
+      return true
+    case 'BUSY':
+      // 单节点服务不可用不代表其他节点故障；429 和没有 HTTP 状态的繁忙仍停止。
+      return error.status === 503
+    default:
+      return false
+  }
+}
+
 export function directDownloadFallbackMessage(error: unknown): string {
   let reason = '直连未能完成'
   if (error instanceof MediaDownloadError) {

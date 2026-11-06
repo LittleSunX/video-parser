@@ -110,40 +110,54 @@ test('failed direct request falls back to a browser attachment', async ({ page }
   expect(calls.unexpected).toEqual([])
 })
 
-test('a denied primary uses the same-quality direct mirror without a proxy request', async ({
-  page,
-}) => {
-  const primary = video()
-  const alternative = media('same-quality.mp4')
-  const calls = await setup(page, {
-    result: { ...primary, videoUrlAlternatives: [alternative] },
-    direct: (route, url) =>
-      route.request().resourceType() === 'document'
-        ? route.fulfill({ body: 'Opened direct link', contentType: 'text/html' })
-        : route.fulfill({
-            status: url.pathname === '/same-quality.mp4' ? 200 : 403,
-            body: url.pathname === '/same-quality.mp4' ? videoBytes : 'Forbidden',
-            headers: {
-              'Access-Control-Allow-Origin': '*',
-              'Content-Type': url.pathname === '/same-quality.mp4' ? 'video/mp4' : 'text/html',
-            },
-          }),
+for (const failedStatus of [403, 503, 206]) {
+  test(`an HTTP ${failedStatus} primary uses the complete direct mirror without a proxy request`, async ({
+    page,
+  }) => {
+    const primary = video()
+    const alternative = media('same-quality.mp4')
+    const calls = await setup(page, {
+      result: { ...primary, videoUrlAlternatives: [alternative] },
+      direct: (route, url) =>
+        route.request().resourceType() === 'document'
+          ? route.fulfill({ body: 'Opened direct link', contentType: 'text/html' })
+          : route.fulfill({
+              status: url.pathname === '/same-quality.mp4' ? 200 : failedStatus,
+              body:
+                url.pathname === '/same-quality.mp4'
+                  ? videoBytes
+                  : failedStatus === 206
+                    ? videoBytes.subarray(0, 4)
+                    : 'Unavailable',
+              headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Expose-Headers': 'Content-Range',
+                'Content-Type':
+                  url.pathname === '/same-quality.mp4' || failedStatus === 206
+                    ? 'video/mp4'
+                    : 'text/html',
+                ...(url.pathname !== '/same-quality.mp4' && failedStatus === 206
+                  ? { 'Content-Range': `bytes 0-3/${videoBytes.length}` }
+                  : {}),
+              },
+            }),
+    })
+    await parse(page)
+    const file = await download(page, page.getByRole('button', { name: '下载视频', exact: true }))
+    expect(file.bytes).toEqual(videoBytes)
+    expect(file.name).toContain(primary.videoId)
+    expect(calls.direct).toEqual(['/123456789.mp4', '/same-quality.mp4'])
+    expect(calls.proxy).toEqual([])
+    expect(calls.unexpected).toEqual([])
+    await page.getByText('备用下载与直链', { exact: true }).click()
+    await expect(page.getByRole('button', { name: '切换直链（2/2）', exact: true })).toBeVisible()
+    const opened = page.waitForEvent('popup')
+    await page.getByRole('button', { name: '打开直链', exact: true }).click()
+    const popup = await opened
+    await expect(popup).toHaveURL(alternative)
+    await popup.close()
   })
-  await parse(page)
-  const file = await download(page, page.getByRole('button', { name: '下载视频', exact: true }))
-  expect(file.bytes).toEqual(videoBytes)
-  expect(file.name).toContain(primary.videoId)
-  expect(calls.direct).toEqual(['/123456789.mp4', '/same-quality.mp4'])
-  expect(calls.proxy).toEqual([])
-  expect(calls.unexpected).toEqual([])
-  await page.getByText('备用下载与直链', { exact: true }).click()
-  await expect(page.getByRole('button', { name: '切换直链（2/2）', exact: true })).toBeVisible()
-  const opened = page.waitForEvent('popup')
-  await page.getByRole('button', { name: '打开直链', exact: true }).click()
-  const popup = await opened
-  await expect(popup).toHaveURL(alternative)
-  await popup.close()
-})
+}
 
 test('manual direct link selection controls the next download and resets after parsing again', async ({
   page,
