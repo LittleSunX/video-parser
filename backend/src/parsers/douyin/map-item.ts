@@ -3,7 +3,7 @@ import type { VideoInfo } from '../../types/video'
 import type { DouyinItem, ParsedMediaResult } from './types'
 import { normalizeAwemeId } from './items'
 import { extractImageAssetsWithCompleteness } from './images'
-import { selectBestBitRateStream } from './streams'
+import { selectBestBitRateStream, toVideoStreamCandidate } from './streams'
 import { extractFirstUrl, normalizeUrl, normalizeText, readNumber, toPlayableUrl } from './text'
 
 export function mapItemToVideoInfo(
@@ -51,11 +51,12 @@ export function mapItemToVideoInfo(
   const bestBitRateStream = selectBestBitRateStream(video.bit_rate)
 
   // 视频作品优先选择 bit_rate 中的最高画质流；没有候选时再回退到默认 play_addr。
-  const videoUrl =
-    bestBitRateStream?.url ??
-    extractFirstUrl(video.play_addr) ??
-    extractFirstUrl(video.play_addr_h264) ??
-    extractFirstUrl(video.download_addr)
+  const selectedStream =
+    bestBitRateStream ??
+    [video.play_addr, video.play_addr_h264, video.download_addr]
+      .map((play_addr) => toVideoStreamCandidate({ play_addr }))
+      .find((candidate) => candidate !== undefined)
+  const videoUrl = selectedStream?.url
 
   if (!videoUrl) {
     throw new AppError(
@@ -75,6 +76,9 @@ export function mapItemToVideoInfo(
   }
 
   const playableUrl = toPlayableUrl(normalizeUrl(videoUrl))
+  // Alternatives must stay paired with this exact selected stream and its file size.
+  const videoUrlAlternatives =
+    playableUrl === normalizeUrl(videoUrl) ? selectedStream?.urlAlternatives : undefined
   // 仅使用所选码率流的大小；变换播放地址后不沿用原文件大小。
   const videoSize =
     bestBitRateStream &&
@@ -96,6 +100,7 @@ export function mapItemToVideoInfo(
       cover: cover ? normalizeUrl(cover) : undefined,
       duration: readNumber(item.duration) || readNumber(video.duration) || undefined,
       videoUrl: playableUrl,
+      ...(videoUrlAlternatives?.length ? { videoUrlAlternatives } : {}),
       ...(videoSize === undefined ? {} : { videoSize }),
       musicUrl: musicUrl ? normalizeUrl(musicUrl) : undefined,
       musicTitle: item.music?.title ? normalizeText(item.music.title) : undefined,

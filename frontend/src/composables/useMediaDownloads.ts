@@ -1,8 +1,9 @@
 import { useBatchDownload } from './useBatchDownload'
 export { imageDownloadTargets, imageDownloadLabel } from '../utils/image-download-targets'
-import { computed, ref, onScopeDispose, type Ref } from 'vue'
+import { computed, ref, shallowRef, onScopeDispose, type Ref } from 'vue'
 import type { VideoInfo } from '../types/video'
-import { fetchMediaBlob } from '../utils/auto-download'
+import { fetchMediaBlob, mediaDownloadUrls } from '../utils/auto-download'
+import { directDownloadFallbackMessage } from '../utils/download-error'
 import { useFileDownload } from './useFileDownload'
 import {
   createDownloadBufferBudget,
@@ -26,6 +27,23 @@ export function useMediaDownloads(
   showNotice: (message: string, duration?: number) => void,
 ) {
   const bufferBudget = createDownloadBufferBudget()
+  // 选择仅属于当前解析结果，不改写原始结果或复用上一部作品的签名地址。
+  const selectedVideoLink = shallowRef<{ video: VideoInfo; url: string }>()
+  const videoDirectLinks = computed(() =>
+    video.value?.videoUrl
+      ? mediaDownloadUrls(video.value.videoUrl, video.value.videoUrlAlternatives)
+      : [],
+  )
+  const videoDirectUrl = computed(() => {
+    const selected = selectedVideoLink.value
+    return selected?.video === video.value && videoDirectLinks.value.includes(selected.url)
+      ? selected.url
+      : videoDirectLinks.value[0]
+  })
+  const videoDirectLinkNumber = computed(() =>
+    videoDirectUrl.value ? videoDirectLinks.value.indexOf(videoDirectUrl.value) + 1 : 0,
+  )
+  const videoDirectLinkCount = computed(() => videoDirectLinks.value.length)
   const selectedImageIndex = ref(0)
   const imageDownloadName = computed(() => '第 ' + (selectedImageIndex.value + 1) + ' 张图片')
   const batch = useBatchDownload({
@@ -141,9 +159,10 @@ export function useMediaDownloads(
   }
 
   async function handleCopyVideoUrl() {
-    if (!video.value?.videoUrl) return
+    const url = videoDirectUrl.value
+    if (!url) return
     try {
-      await copyText(video.value.videoUrl)
+      await copyText(url)
       showNotice('视频地址已复制')
     } catch (error) {
       showNotice(error instanceof Error ? error.message : '复制失败')
@@ -165,11 +184,26 @@ export function useMediaDownloads(
       )
       return
     }
-    return downloadSingleVideo(current.videoUrl, buildVideoFilename(current), '视频')
+    return downloadSingleVideo(
+      videoDirectUrl.value ?? current.videoUrl,
+      buildVideoFilename(current),
+      '视频',
+      {
+        alternativeUrls: videoDirectLinks.value,
+        onSourceReady(url) {
+          if (video.value === current) selectedVideoLink.value = { video: current, url }
+        },
+      },
+    )
   }
 
   /** 普通视频与单个实况共用直连、进度、缓冲保存及代理回退。 */
-  async function downloadSingleVideo(url: string, filename: string, label: string) {
+  async function downloadSingleVideo(
+    url: string,
+    filename: string,
+    label: string,
+    sources?: { alternativeUrls?: string[]; onSourceReady?: (url: string) => void },
+  ) {
     if (videoDownloading.value || !canStartSingleDownload()) return
     const release = bufferBudget.acquire(videoOwner, PAGE_BUFFER_BUDGET_BYTES)
     if (!release) {
@@ -191,6 +225,7 @@ export function useMediaDownloads(
     try {
       const blob = await fetchMediaBlob(url, {
         signal: controller.signal,
+        ...sources,
         // 持续收到数据时不限总时长，连接和读取停滞仍由各自超时保护。
         totalTimeoutMs: 0,
         onProgress(received, total) {
@@ -207,7 +242,7 @@ export function useMediaDownloads(
       downloadState.value = 'handed-off'
       downloadStatus.value = '已请求浏览器保存，请查看下载列表；未保存时可在 30 秒内再次保存。'
       showNotice(label + '已交给浏览器保存，请查看下载列表', 6000)
-    } catch {
+    } catch (error) {
       if (controller.signal.aborted || downloadController !== controller) return
       if (videoPrepared.canSave.value) {
         downloadState.value = 'failed'
@@ -216,7 +251,7 @@ export function useMediaDownloads(
       } else {
         release()
         releaseVideoBuffer = undefined
-        startNativeDownload(url, filename, '已切换到备用下载', label)
+        startNativeDownload(url, filename, directDownloadFallbackMessage(error), label)
       }
     } finally {
       release()
@@ -255,8 +290,19 @@ export function useMediaDownloads(
   }
 
   function handleOpenVideoLink() {
-    if (!video.value?.videoUrl) return
-    openDirectDownload(video.value.videoUrl)
+    if (!videoDirectUrl.value) return
+    openDirectDownload(videoDirectUrl.value)
+  }
+
+  function handleSwitchVideoLink() {
+    const current = video.value
+    const links = videoDirectLinks.value
+    if (!current || links.length < 2 || videoDownloading.value) return
+    selectedVideoLink.value = {
+      video: current,
+      url: links[videoDirectLinkNumber.value % links.length],
+    }
+    showNotice('已切换直链，请重新打开或复制地址')
   }
 
   function handleProxyDownloadVideo() {
@@ -304,6 +350,9 @@ export function useMediaDownloads(
     downloadLabel,
     downloadState,
     downloadNeedsReparse,
+    videoDirectLinkNumber,
+    videoDirectLinkCount,
+    handleSwitchVideoLink,
     handleCopyVideoUrl,
     handleDownloadVideo,
     cancelVideoDownload,

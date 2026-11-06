@@ -1,5 +1,6 @@
 export type Platform = 'douyin' | 'kuaishou' | 'xiaohongshu' | 'tiktok' | 'unknown'
 export type MediaType = 'video' | 'image'
+export const MAX_VIDEO_URL_ALTERNATIVES = 2
 
 export interface ImageAsset {
   url: string
@@ -18,6 +19,8 @@ export interface VideoInfo {
   /** 时长，单位为毫秒。 */
   duration?: number
   videoUrl?: string
+  /** 所选同一画质流的其他上游 HTTPS 地址，保持原始顺序和签名。 */
+  videoUrlAlternatives?: string[]
   /** 与 videoUrl 对应的上游文件字节数；未知时省略，仍需遵守实际接收上限。 */
   videoSize?: number
   images?: ImageAsset[]

@@ -1,4 +1,5 @@
 import type { ValidatedVideoInfo } from './video'
+import { MAX_VIDEO_URL_ALTERNATIVES } from './video'
 
 export type VideoContractIssue = 'resource' | 'size' | 'completeness' | 'status' | 'metadata'
 type Validation =
@@ -34,6 +35,15 @@ export function validateVideoInfo(data: unknown): Validation {
           (image.livePhotoUrl === undefined || typeof image.livePhotoUrl === 'string') &&
           (image.watermarkFree === undefined || typeof image.watermarkFree === 'boolean'),
       ))
+  )
+    return invalid('resource')
+
+  if (
+    data.videoUrlAlternatives !== undefined &&
+    (!Array.isArray(data.videoUrlAlternatives) ||
+      data.videoUrlAlternatives.length > MAX_VIDEO_URL_ALTERNATIVES ||
+      !data.videoUrlAlternatives.every((url) => typeof url === 'string') ||
+      (data.videoUrlAlternatives.length > 0 && data.mediaType !== 'video'))
   )
     return invalid('resource')
 

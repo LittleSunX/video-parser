@@ -55,6 +55,9 @@ const {
   downloadLabel,
   downloadState,
   downloadNeedsReparse,
+  videoDirectLinkNumber,
+  videoDirectLinkCount,
+  handleSwitchVideoLink,
   handleCopyVideoUrl,
   handleDownloadVideo,
   cancelVideoDownload,
@@ -452,6 +455,15 @@ function platformName(platform: VideoInfo['platform']) {
                 @click="handleOpenVideoLink"
               >
                 打开直链<AppIcon name="arrow" />
+              </button>
+              <button
+                v-if="videoDirectLinkCount > 1"
+                class="secondary-button"
+                type="button"
+                :disabled="loading || videoDownloading"
+                @click="handleSwitchVideoLink"
+              >
+                切换直链（{{ videoDirectLinkNumber }}/{{ videoDirectLinkCount }}）
               </button>
             </div>
           </details>

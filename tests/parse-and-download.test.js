@@ -5,13 +5,16 @@ import assert from 'node:assert/strict'
 import { effectScope } from 'vue'
 import { useVideoPage } from '../frontend/src/composables/useVideoPage'
 import { parseVideo as apiParseVideo } from '../frontend/src/api/video'
-import { triggerDownload } from '../frontend/src/utils/download'
+import { copyText, openDirectDownload, triggerDownload } from '../frontend/src/utils/download'
 import * as mediaArchive from '../frontend/src/utils/media-archive'
 import { PREPARED_DOWNLOAD_TTL_MS } from '../frontend/src/utils/prepared-download'
 import { VIDEO_BUFFER_BYTES } from '../frontend/src/utils/download-buffer'
+import { MediaDownloadError } from '../frontend/src/utils/download-error'
 
 vi.mock('../frontend/src/api/video', () => ({ parseVideo: vi.fn() }))
 vi.mock('../frontend/src/utils/download', () => ({
+  copyText: vi.fn(),
+  openDirectDownload: vi.fn(),
   triggerDownload: vi.fn(),
   buildDownloadUrl: (url) => 'https://proxy/?url=' + encodeURIComponent(url),
   buildVideoFilename: () => 'video.mp4',
@@ -653,16 +656,171 @@ test('video download saves a CDN response as a blob without opening a tab', asyn
   assert.equal(app.videoDownloading.value, false)
 })
 
+test('a same-quality mirror saves complete video bytes after the primary rejects direct download', async () => {
+  const { clicks, blobs } = mockBrowserSave()
+  const primary = 'https://v1.douyinvod.com/high-quality.mp4'
+  const alternative = 'https://v2.douyinvod.com/high-quality.mp4'
+  const bytes = new Uint8Array([4, 5, 6, 7])
+  const fetch = vi.fn(async (url) =>
+    url === primary
+      ? new Response('forbidden', { status: 403 })
+      : new Response(bytes, {
+          headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(bytes.length) },
+        }),
+  )
+  global.fetch = fetch
+  const { app, downloads } = createApp()
+  app.video.value = {
+    mediaType: 'video',
+    videoUrl: primary,
+    videoUrlAlternatives: [alternative],
+  }
+  await app.handleDownloadVideo()
+  assert.deepEqual(
+    fetch.mock.calls.map(([url]) => url),
+    [primary, alternative],
+  )
+  assert.deepEqual(new Uint8Array(await blobs[0].arrayBuffer()), bytes)
+  assert.equal(clicks.length, 1)
+  assert.equal(clicks[0].download, 'video.mp4')
+  assert.equal(downloads.length, 0)
+  assert.equal(app.downloadState.value, 'handed-off')
+  assert.equal(app.video.value.videoUrl, primary)
+  app.handleOpenVideoLink()
+  await app.handleCopyVideoUrl()
+  assert.equal(vi.mocked(openDirectDownload).mock.lastCall[0], alternative)
+  assert.equal(vi.mocked(copyText).mock.lastCall[0], alternative)
+  assert.equal(app.videoDirectLinkNumber.value, 2)
+  await app.handleDownloadVideo()
+  assert.deepEqual(
+    fetch.mock.calls.map(([url]) => url),
+    [primary, alternative, alternative],
+  )
+})
+
+test('manual direct link switching is bounded and a new parse cannot reuse a previous signed URL', async () => {
+  const primary = 'https://v1.douyinvod.com/video.mp4?signature=one%2Ftwo'
+  const alternative = 'https://v2.douyinvod.com/video.mp4?signature=three%2Ffour'
+  const fresh = 'https://v1.douyinvod.com/video.mp4?signature=fresh'
+  const { app } = createApp(async () => ({ mediaType: 'video', videoUrl: fresh }))
+  app.video.value = {
+    mediaType: 'video',
+    videoUrl: primary,
+    videoUrlAlternatives: [primary, alternative, 'http://v3.douyinvod.com/insecure.mp4'],
+  }
+  assert.equal(app.videoDirectLinkCount.value, 2)
+  app.handleSwitchVideoLink()
+  app.handleOpenVideoLink()
+  await app.handleCopyVideoUrl()
+  assert.equal(vi.mocked(openDirectDownload).mock.lastCall[0], alternative)
+  assert.equal(vi.mocked(copyText).mock.lastCall[0], alternative)
+  app.handleSwitchVideoLink()
+  app.handleOpenVideoLink()
+  assert.equal(vi.mocked(openDirectDownload).mock.lastCall[0], primary)
+  app.handleSwitchVideoLink()
+  app.input.value = url
+  await app.handleParse()
+  app.handleOpenVideoLink()
+  await app.handleCopyVideoUrl()
+  assert.equal(vi.mocked(openDirectDownload).mock.lastCall[0], fresh)
+  assert.equal(vi.mocked(copyText).mock.lastCall[0], fresh)
+  assert.equal(app.videoDirectLinkCount.value, 1)
+  assert.equal(app.videoDirectLinkNumber.value, 1)
+})
+
+test('exhausting every same-quality direct address launches exactly one proxy download', async () => {
+  const primary = 'https://v1.douyinvod.com/high-quality.mp4'
+  const alternatives = [
+    'https://v2.douyinvod.com/high-quality.mp4',
+    'https://v3.douyinvod.com/high-quality.mp4',
+  ]
+  const fetch = vi.fn(async () => new Response('forbidden', { status: 403 }))
+  global.fetch = fetch
+  const { app, downloads } = createApp()
+  app.video.value = {
+    mediaType: 'video',
+    videoUrl: primary,
+    videoUrlAlternatives: alternatives,
+  }
+  await app.handleDownloadVideo()
+  assert.deepEqual(
+    fetch.mock.calls.map(([url]) => url),
+    [primary, ...alternatives],
+  )
+  assert.deepEqual(downloads, [{ url: primary, filename: 'video.mp4' }])
+  assert.equal(app.downloadState.value, 'fallback')
+  assert.match(app.downloadStatus.value, /拒绝直连（HTTP 403）/)
+  assert.equal(app.bufferBusy.value, false)
+})
+
+test('cancelling a mirror transfer stops before another address or proxy is requested', async () => {
+  const primary = 'https://v1.douyinvod.com/high-quality.mp4'
+  const alternatives = [
+    'https://v2.douyinvod.com/high-quality.mp4',
+    'https://v3.douyinvod.com/high-quality.mp4',
+  ]
+  const fetch = vi.fn(async (url, options) =>
+    url === primary ? new Response('forbidden', { status: 403 }) : hangUntilAborted(options.signal),
+  )
+  global.fetch = fetch
+  const { app, downloads } = createApp()
+  app.video.value = {
+    mediaType: 'video',
+    videoUrl: primary,
+    videoUrlAlternatives: alternatives,
+  }
+  const running = app.handleDownloadVideo()
+  await vi.waitFor(() => assert.equal(fetch.mock.calls.length, 2))
+  app.cancelVideoDownload()
+  await running
+  assert.deepEqual(
+    fetch.mock.calls.map(([url]) => url),
+    [primary, alternatives[0]],
+  )
+  assert.equal(downloads.length, 0)
+  assert.equal(app.downloadState.value, 'cancelled')
+  assert.equal(app.bufferBusy.value, false)
+  app.handleOpenVideoLink()
+  assert.equal(vi.mocked(openDirectDownload).mock.lastCall[0], primary)
+})
+
 test('CORS failure automatically falls back to the existing download endpoint', async () => {
   global.fetch = async () => {
-    throw new TypeError('Failed to fetch')
+    throw new TypeError('Failed to fetch https://media.example/video.mp4?signature=PRIVATE')
   }
   const { app, downloads } = createApp()
   app.video.value = { mediaType: 'video', videoUrl: 'https://cdn/video.mp4' }
   await app.handleDownloadVideo()
   assert.equal(downloads.length, 1)
   assert.match(app.downloadStatus.value, /已切换到备用下载/)
+  assert.match(app.downloadStatus.value, /网络或浏览器跨域限制/)
+  assert.doesNotMatch(app.downloadStatus.value, /https:|signature|PRIVATE/)
   assert.equal(app.downloadState.value, 'fallback')
+})
+
+test.each([401, 403])('HTTP %s explains why video direct download falls back', async (status) => {
+  const fetch = vi.fn(async () => new Response('private upstream denial', { status }))
+  global.fetch = fetch
+  const { app, downloads } = createApp()
+  app.video.value = { mediaType: 'video', videoUrl: 'https://cdn/video.mp4' }
+  await app.handleDownloadVideo()
+  assert.equal(fetch.mock.calls.length, 1)
+  assert.equal(downloads.length, 1)
+  assert.match(app.downloadStatus.value, new RegExp('拒绝直连（HTTP ' + status + '）'))
+  assert.doesNotMatch(app.downloadStatus.value, /已失效|private upstream denial/)
+  assert.equal(app.downloadState.value, 'fallback')
+})
+
+test('a direct timeout reports the controlled reason and never exposes an exception message', async () => {
+  global.fetch = async () => {
+    throw new MediaDownloadError('TIMEOUT', 'PRIVATE https://media.example/video?signature=secret')
+  }
+  const { app, downloads } = createApp()
+  app.video.value = { mediaType: 'video', videoUrl: 'https://cdn/video.mp4' }
+  await app.handleDownloadVideo()
+  assert.equal(downloads.length, 1)
+  assert.match(app.downloadStatus.value, /直连响应或读取超时.*已切换到备用下载/)
+  assert.doesNotMatch(app.downloadStatus.value, /PRIVATE|https:|signature|secret/)
 })
 
 test('cancelling a direct download never launches a fallback download', async () => {

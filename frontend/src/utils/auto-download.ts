@@ -1,8 +1,13 @@
 import { MediaDownloadError, responseDownloadError } from './download-error'
 import { SINGLE_BUFFER_BYTES, VIDEO_BUFFER_BYTES } from './download-buffer'
+import { MAX_VIDEO_URL_ALTERNATIVES } from '../../../shared/video'
 
 interface DownloadOptions {
   signal: AbortSignal
+  /** 同一文件的上游 HTTPS 镜像；最多尝试两个，不改写签名或降低画质。 */
+  alternativeUrls?: string[]
+  /** 完整接收后记住所用地址，供打开直链和复制地址复用。 */
+  onSourceReady?: (url: string) => void
   totalTimeoutMs?: number
   responseTimeoutMs?: number
   readTimeoutMs?: number
@@ -11,8 +16,43 @@ interface DownloadOptions {
   onProgress: (received: number, total?: number) => void
 }
 
-/** 受限读取媒体内容，支持取消、超时和大小限制。 */
+export function mediaDownloadUrls(url: string, alternativeUrls: string[] = []): string[] {
+  return [
+    ...new Set([url, ...alternativeUrls.filter((value) => /^https:\/\//i.test(value))]),
+  ].slice(0, MAX_VIDEO_URL_ALTERNATIVES + 1)
+}
+
+/** 首地址失败时尝试同一文件的其他直连地址，每次都独立读取完整文件。 */
 export async function fetchMediaBlob(
+  url: string,
+  options: DownloadOptions,
+  kind: 'video' | 'image' | 'audio' = 'video',
+  maxBytes = kind === 'video' ? VIDEO_BUFFER_BYTES : SINGLE_BUFFER_BYTES,
+): Promise<Blob> {
+  const urls = mediaDownloadUrls(url, options.alternativeUrls)
+  let lastError: unknown
+  for (const candidate of urls) {
+    options.signal.throwIfAborted()
+    let blob: Blob
+    try {
+      blob = await fetchSingleMediaBlob(candidate, options, kind, maxBytes)
+    } catch (error) {
+      options.signal.throwIfAborted()
+      // 这些失败与同一文件的节点无关，避免重复传输或增加上游请求。
+      if (!(error instanceof MediaDownloadError) || ['TOO_LARGE', 'BUSY'].includes(error.code))
+        throw error
+      lastError = error
+      continue
+    }
+    options.signal.throwIfAborted()
+    options.onSourceReady?.(candidate)
+    return blob
+  }
+  throw lastError
+}
+
+/** 受限读取单个地址的媒体内容，支持取消、超时和大小限制。 */
+async function fetchSingleMediaBlob(
   url: string,
   {
     signal,

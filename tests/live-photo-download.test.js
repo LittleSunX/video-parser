@@ -260,8 +260,16 @@ test.each([65 * 1024 * 1024, 100 * 1024 * 1024, VIDEO_BUFFER_BYTES])(
 )
 
 test.each([
-  ['CORS rejection', () => Promise.reject(new TypeError('Failed to fetch'))],
-  ['HTTP 403', () => Promise.resolve(new Response('forbidden', { status: 403 }))],
+  [
+    'CORS rejection',
+    () => Promise.reject(new TypeError('Failed to fetch')),
+    /网络或浏览器跨域限制/,
+  ],
+  [
+    'HTTP 403',
+    () => Promise.resolve(new Response('forbidden', { status: 403 })),
+    /拒绝直连（HTTP 403）/,
+  ],
   [
     'oversized MP4',
     () =>
@@ -273,10 +281,11 @@ test.each([
           },
         }),
       ),
+    /超过页面缓冲上限/,
   ],
 ])(
   'a live %s starts one native Worker fallback without saving partial content',
-  async (_reason, response) => {
+  async (_reason, response, expectedReason) => {
     const fetch = vi.fn(response)
     vi.stubGlobal('fetch', fetch)
     const pack = vi.spyOn(mediaArchive, 'createMediaArchive')
@@ -289,6 +298,7 @@ test.each([
     expect(url).toBe(firstLiveUrl)
     expect(filename).toBe(buildLivePhotoFilename(parsed, 0))
     expect(app.downloadState.value).toBe('fallback')
+    expect(app.downloadStatus.value).toMatch(expectedReason)
     expect(app.videoDownloading.value).toBe(false)
     expect(app.bufferBusy.value).toBe(false)
     expect(app.canSaveVideoAgain.value).toBe(false)
