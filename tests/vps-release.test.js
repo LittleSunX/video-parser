@@ -6,6 +6,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { parseReleaseArchive } from '../deploy/apply-vps-release.mjs'
+import { monitoringAssets } from '../deploy/install-vps-monitoring.mjs'
 import {
   createVpsArchive,
   deployVps,
@@ -54,6 +55,13 @@ async function artifacts(directory, overrides = {}) {
     JSON.stringify({ commit, builtAt: timestamp }),
   )
   await writeFile(join(directory, 'server/dist/index.mjs'), 'fixture backend')
+  await writeFile(join(directory, 'server/dist/monitor.mjs'), 'fixture monitor')
+  await mkdir(join(directory, 'deploy'))
+  for (const name of monitoringAssets)
+    await writeFile(
+      join(directory, 'deploy', name),
+      await readFile(new URL('../deploy/' + name, import.meta.url)),
+    )
   await writeFile(
     join(directory, 'server/dist/version.json'),
     JSON.stringify({ runtime: 'node', tag: commit, id: uuid, timestamp, ...overrides }),
@@ -153,8 +161,18 @@ test('real ustar archive contains paired builds and excludes source, notes and c
   expect(JSON.parse(entries.get('server/version.json').body.toString()).tag).toBe(commit)
   expect(tar).toContain('frontend/assets/app.js')
   expect(tar).toContain('server/index.mjs')
+  expect(entries.get('server/monitor.mjs').body.toString()).toBe('fixture monitor')
+  for (const name of monitoringAssets)
+    expect(entries.get('operations/' + name).body.length).toBeGreaterThan(0)
   expect(tar).toContain('fixture backend')
   expect(tar).not.toMatch(/PRIVATE_NOTES|PRIVATE_CREDENTIAL|private.json|\.env/)
+})
+
+test('new release packaging cannot silently omit the monitor', async () => {
+  const directory = await temporary()
+  await artifacts(directory)
+  await rm(join(directory, 'server/dist/monitor.mjs'))
+  await expect(createVpsArchive(directory, await temporary(), commit)).rejects.toThrow()
 })
 
 test('symbolic links in generated artifacts cannot escape the release package', async () => {

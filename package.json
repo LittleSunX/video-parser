@@ -29,7 +29,8 @@
     "format:check": "prettier --check .",
     "check": "npm run format:check && npm run lint && npm test && npm run build",
     "test:browser": "playwright test",
-    "diagnostics:summary": "node scripts/summarize-diagnostics.mjs"
+    "diagnostics:summary": "node scripts/summarize-diagnostics.mjs",
+    "monitor:once": "node server/monitor-entry.mjs"
   },
   "engines": {
     "node": "^22.13.0 || >=24.0.0"

@@ -1,5 +1,6 @@
 import { AppError } from '../errors/app-error'
 import { validateFullMediaRange } from '../../../shared/media-response'
+import { errorCode, type Diagnostics } from '../utils/diagnostics'
 
 const MEDIA_HOST_SUFFIXES = [
   'douyinvod.com',
@@ -29,7 +30,9 @@ export async function fetchMedia(
   initialUrl: URL,
   range: string | null,
   clientSignal: AbortSignal,
+  trace?: Diagnostics,
 ): Promise<Response> {
+  const started = Date.now()
   const controller = new AbortController()
   const cancel = () => controller.abort(new AppError('DOWNLOAD_CANCELLED', '下载已取消', 499))
   if (clientSignal.aborted) cancel()
@@ -114,6 +117,14 @@ export async function fetchMedia(
       controller,
       cleanup,
       fullRange?.valid ? fullRange.length : undefined,
+      (outcome, bytes, error) =>
+        trace?.emit('download_transfer', {
+          outcome,
+          bytes,
+          rangeRequest: !!range,
+          durationMs: Math.max(0, Date.now() - started),
+          ...(error === undefined ? {} : { code: errorCode(error) }),
+        }),
     )
     return new Response(body, { status: upstream.status, headers: upstream.headers })
   } catch (error) {
@@ -131,12 +142,20 @@ function guardMediaStream(
   abortController: AbortController,
   cleanup: () => void,
   expectedLength?: number,
+  onEnd?: (outcome: 'success' | 'error' | 'cancelled', bytes: number, error?: unknown) => void,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader()
   let ended = false
   let received = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   let output: ReadableStreamDefaultController<Uint8Array>
+  const report = (outcome: 'success' | 'error' | 'cancelled', error?: unknown) => {
+    try {
+      onEnd?.(outcome, received, error)
+    } catch {
+      /* 诊断失败不能改变媒体传输。 */
+    }
+  }
   const finish = () => {
     ended = true
     clearTimeout(timer)
@@ -151,6 +170,11 @@ function guardMediaStream(
   }
   const onAbort = () => {
     if (ended) return
+    const reason = abortController.signal.reason
+    report(
+      reason instanceof AppError && reason.code === 'DOWNLOAD_CANCELLED' ? 'cancelled' : 'error',
+      reason,
+    )
     finish()
     output.error(abortController.signal.reason)
     stopReader()
@@ -178,6 +202,7 @@ function guardMediaStream(
           finish()
           reader.releaseLock()
           controller.close()
+          report('success')
         } else {
           received += value.byteLength
           if (expectedLength !== undefined && received > expectedLength)
@@ -192,6 +217,7 @@ function guardMediaStream(
     cancel() {
       if (ended) return
       finish()
+      report('cancelled')
       abortController.abort(new AppError('DOWNLOAD_CANCELLED', '下载已取消', 499))
       stopReader()
     },

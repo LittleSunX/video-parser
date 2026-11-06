@@ -181,6 +181,61 @@ test('valid archives retain exact bytes and standard archive size bounds', () =>
   })
 })
 
+test('deployment installs monitoring while stopped and requires a verified sample before success', async () => {
+  const f = await fixture()
+  const monitoring = {
+    install: vi.fn(async () => {
+      f.calls.push('monitor-install')
+    }),
+    verify: vi.fn(async () => {
+      f.calls.push('monitor-verify')
+    }),
+    rollback: vi.fn(),
+  }
+  const prepareMonitoring = vi.fn(async () => monitoring)
+  const result = await applyRelease(f.args, { ...f.deps, prepareMonitoring })
+  expect(result.monitoring).toBe('verified')
+  expect(f.calls).toEqual(['ensureInstalled', 'stop', 'monitor-install', 'start', 'monitor-verify'])
+  expect(monitoring.verify).toHaveBeenCalledWith(id)
+  expect(monitoring.rollback).not.toHaveBeenCalled()
+})
+
+test.each([false, true])(
+  'failed first sample restores the API even if monitoring restore fails (%s)',
+  async (restoreFails) => {
+    const f = await fixture()
+    const monitoring = {
+      install: vi.fn(),
+      verify: vi.fn(async () => {
+        throw new Error('Wrong journal namespace')
+      }),
+      rollback: vi.fn(async () => {
+        if (restoreFails) throw new Error('Restore failed')
+      }),
+    }
+    await expect(
+      applyRelease(f.args, { ...f.deps, prepareMonitoring: async () => monitoring }),
+    ).rejects.toMatchObject({ status: restoreFails ? 'rollback_failed' : 'rolled_back' })
+    expect(monitoring.rollback).toHaveBeenCalledOnce()
+    expect(await fs.realpath(join(f.root, 'current'))).toBe(f.previous)
+    expect(f.service.start).toHaveBeenCalledTimes(2)
+  },
+)
+
+test('monitoring preflight failure never stops the running API', async () => {
+  const f = await fixture()
+  await expect(
+    applyRelease(f.args, {
+      ...f.deps,
+      prepareMonitoring: async () => {
+        throw new Error('Unsupported systemd')
+      },
+    }),
+  ).rejects.toThrow('Unsupported systemd')
+  expect(f.service.stop).not.toHaveBeenCalled()
+  expect(await fs.realpath(join(f.root, 'current'))).toBe(f.previous)
+})
+
 test.each([
   ['/outside', '0'],
   ['frontend/../outside', '0'],

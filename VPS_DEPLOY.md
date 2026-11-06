@@ -153,6 +153,7 @@ RELEASE_ID=$(node -p 'JSON.parse(require("fs").readFileSync("server/dist/version
 
 - `frontend/dist/`：静态前端与它自己的 `version.json`（`commit`、`builtAt`）。
 - `server/dist/index.mjs` 与 `server/dist/version.json`：独立可运行的 Node 包，运行时只需受支持的系统 Node，不需要源码、Git、npm 或 `node_modules`。
+- `server/dist/monitor.mjs`：独立监控程序；基础部署完成后运行一次[一键发布](guides/vps-one-click.md)，自动安装监控、设置日志保留并验证首次采样，详见[监控指南](guides/monitoring.md)。
 - Node 元数据包含 `runtime: node`、UUID `id`、完整 SHA `tag`、ISO 时间 `timestamp`。重启不会改变 ID，重新 build 会产生新 ID。缺少/非法元数据时启动失败，不会现场编造版本；必须把两个 Node 文件作为一对发布，不能手改版本“修复”检查。
 
 ## 4. 安装版本化目录与环境文件
@@ -170,7 +171,7 @@ RELEASE_DIR="/opt/video-parser/releases/$RELEASE_ID"
 sudo test ! -e "$RELEASE_DIR"
 sudo install -d -o root -g root -m 0755 "$RELEASE_DIR/frontend" "$RELEASE_DIR/server"
 sudo cp -a frontend/dist/. "$RELEASE_DIR/frontend/"
-sudo install -o root -g root -m 0644 server/dist/index.mjs server/dist/version.json "$RELEASE_DIR/server/"
+sudo install -o root -g root -m 0644 server/dist/index.mjs server/dist/version.json server/dist/monitor.mjs "$RELEASE_DIR/server/"
 sudo chown -R root:root "$RELEASE_DIR"
 sudo chmod -R u=rwX,go=rX "$RELEASE_DIR"
 # 首次发布，不覆盖已经存在的 current。
@@ -186,6 +187,7 @@ sudo ln -s "$RELEASE_DIR" /opt/video-parser/current
 │   ├── frontend/          # frontend/dist 的内容
 │   └── server/
 │       ├── index.mjs
+│       ├── monitor.mjs
 │       └── version.json
 └── current -> releases/<Node构建UUID>
 /etc/video-parser/server.env
@@ -303,7 +305,7 @@ sudo systemctl enable --now nginx
 启动失败可查看：
 
 ```bash
-sudo journalctl -u video-parser --since '10 minutes ago' --no-pager
+sudo journalctl --namespace='*' -u video-parser --since '10 minutes ago' --no-pager
 ```
 
 `startup_failed` 不包含原始异常或配置值。分别核对 Node 版本、路径权限、端口占用、环境变量格式以及产物配对，不要为了打印原始异常而放宽日志策略。

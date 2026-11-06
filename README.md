@@ -126,7 +126,7 @@ npm run dev:frontend
 
 **[开始部署：Nginx + Node →](VPS_DEPLOY.md)**
 
-完成首次配置后，可使用 [VPS 一键发布](guides/vps-one-click.md)，通过 GitHub 按钮或一条本地命令更新配套前后端。
+完成首次配置后，可使用 [VPS 一键发布](guides/vps-one-click.md)，通过 GitHub 按钮或一条本地命令更新配套前后端，并自动启用本机监控与专用日志保留策略。
 
 ### 方式三：Cloudflare Worker 后端与 VPS 前端
 
@@ -146,6 +146,7 @@ Cloudflare Pages、前后端分开托管等选择放在 [其他部署组合](gui
 | [API 说明](guides/api.md)                     | 解析、渐进结果、下载、健康检查与限流                               |
 | [实现与开发说明](guides/implementation.md)    | 解析策略、资源合并、下载与 ZIP 分包、诊断和验收                    |
 | [部署版本检查](RELEASE_CHECK.md)              | 检查线上版本、分别指定前后端提交                                   |
+| [运行监控与告警](guides/monitoring.md)        | 定时健康探测、按版本统计、服务器告警与恢复记录                     |
 
 ## 开发
 

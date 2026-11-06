@@ -18,8 +18,9 @@ export async function buildServer({ outdir = join(directory, 'dist') } = {}) {
   const version = { runtime: 'node', id: randomUUID(), tag, timestamp: new Date().toISOString() }
   const result = await build({
     absWorkingDir: directory,
-    entryPoints: ['src/index.ts'],
-    outfile: join(resolve(outdir), 'index.mjs'),
+    entryPoints: { index: 'src/index.ts', monitor: 'monitor-entry.mjs' },
+    outdir: resolve(outdir),
+    outExtension: { '.js': '.mjs' },
     bundle: true,
     platform: 'node',
     format: 'esm',

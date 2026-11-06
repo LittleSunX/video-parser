@@ -7,8 +7,9 @@ import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import process from 'node:process'
+import { monitoringAssets, prepareMonitoring } from './install-vps-monitoring.mjs'
 
-// Self-contained: this file is uploaded with the archive and needs no npm packages.
+// Uploaded with install-vps-monitoring.mjs; both use only Node built-ins.
 export const archiveLimits = {
   compressed: 64 * 1024 * 1024,
   extracted: 128 * 1024 * 1024,
@@ -90,9 +91,13 @@ function archivePath(name, directory) {
     !(name === 'frontend' && directory) &&
     !name.startsWith('frontend/') &&
     !(directory && name === 'server') &&
-    !(!directory && ['server/index.mjs', 'server/version.json'].includes(name))
+    !(directory && name === 'operations') &&
+    !(!directory && monitoringAssets.some((asset) => name === 'operations/' + asset)) &&
+    !(
+      !directory && ['server/index.mjs', 'server/version.json', 'server/monitor.mjs'].includes(name)
+    )
   )
-    throw failure('tar 只能包含 frontend/ 与两个 server 产物', 'INVALID_ARCHIVE')
+    throw failure('tar 只能包含 frontend/ 与允许的 server、operations 产物', 'INVALID_ARCHIVE')
   return name
 }
 
@@ -514,6 +519,7 @@ export async function applyRelease(args, overrides = {}) {
   const deps = {
     root: '/opt/video-parser',
     service: systemService(),
+    prepareMonitoring,
     fetchFn: globalThis.fetch,
     switchCurrent: replaceCurrent,
     pollAttempts: 15,
@@ -531,6 +537,7 @@ export async function applyRelease(args, overrides = {}) {
   const releaseLock = await lock(root)
   let record,
     staging,
+    monitoring,
     mutationStarted = false
   try {
     let previous, old
@@ -554,6 +561,7 @@ export async function applyRelease(args, overrides = {}) {
     await requireUnusedRelease(release)
     staging = await fs.mkdtemp(join(dirname(release), '.staging-'))
     await materialize(entries, staging)
+    monitoring = await deps.prepareMonitoring(entries, { root })
     record = {
       transaction: randomUUID(),
       status: 'prepared',
@@ -574,6 +582,7 @@ export async function applyRelease(args, overrides = {}) {
     staging = undefined
     mutationStarted = true
     await deps.service.stop()
+    await monitoring?.install()
     args.signal?.throwIfAborted()
     await deps.switchCurrent(root, release)
     await deps.service.start()
@@ -581,7 +590,10 @@ export async function applyRelease(args, overrides = {}) {
     await verify('http://127.0.0.1:8787', 'api/health', next, deps, args.signal)
     await verify(input.site, 'version.json', next, deps, args.signal)
     await verify(input.site, 'api/health', next, deps, args.signal)
+    await monitoring?.verify(next.server.id)
+    args.signal?.throwIfAborted()
     record.status = 'succeeded'
+    record.monitoring = monitoring ? 'verified' : 'unchanged'
     record.completedAt = new Date().toISOString()
     await writeRecord(root, record)
     return { passed: true, ...record }
@@ -591,10 +603,15 @@ export async function applyRelease(args, overrides = {}) {
         try {
           // Retry stop even if the first stop/start command failed partway through.
           await deps.service.stop().catch(() => {})
+          let monitoringRestored = true
+          await monitoring?.rollback().catch(() => {
+            monitoringRestored = false
+          })
           await deps.switchCurrent(root, record.previousRelease)
           await deps.service.start()
           const old = await installedVersions(record.previousRelease)
           await verify('http://127.0.0.1:8787', 'api/health', old, deps)
+          if (!monitoringRestored) throw new Error('Monitoring rollback failed', { cause: error })
           record.status = 'rolled_back'
         } catch {
           record.status = 'rollback_failed'

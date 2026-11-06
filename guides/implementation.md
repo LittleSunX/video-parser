@@ -276,6 +276,8 @@ Node 的版本在 build 时生成并存入 `server/dist/version.json`，重启�
 
 ### 本地诊断统计
 
+需要持续采样、健康检查和本机告警时，使用[运行监控与日志告警](monitoring.md)。监控复用同一统计核心；诊断记录新增 UTC `timestamp`，后端媒体流结束时增加 `download_transfer`，分别记录完成、错误和取消。传输完成不代表浏览器已保存文件。
+
 把应用直接输出的 JSON 日志保存为每行一条记录的 NDJSON 文件后，在仓库根目录执行：
 
 ```bash
