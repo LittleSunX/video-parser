@@ -31,7 +31,7 @@
 
 ## 随一键发布启用
 
-已完成基础 VPS 配置后，将代码合并到 `main`，在 **Deploy VPS → Run workflow** 选择 `main` 发起一次新运行即可；不要重新运行旧提交的历史任务。不需要新增 GitHub Secrets、手动上传监控文件或另外重启服务。首次启用要求 systemd 245 及以上、`systemd-journal` 组和既有 `/usr/bin/node`；不满足条件会在停止业务服务前拒绝发布。
+已完成基础 VPS 配置后，将代码合并到 `main`，在 **Deploy VPS → Run workflow** 选择 `main` 发起一次新运行即可；不要重新运行旧提交的历史任务。不需要新增 GitHub Secrets、手动上传监控文件或另外重启服务。首次启用要求 systemd 247 及以上、`systemd-journal` 组和既有 `/usr/bin/node`；不满足条件会在停止业务服务前拒绝发布。
 
 新发布包必须包含监控程序和全部配置模板。发布器会自动安装 service/timer、创建缺失的私有配置、配置专用 journal，并先实际采样一次。只有采样结果新鲜、API 版本正确、当前版本日志可读取、timer 已启用且运行时，服务器才记录发布成功。
 
@@ -39,7 +39,7 @@
 
 安装、服务启动或首次采样失败时，发布器尝试恢复原有监控文件、timer 状态和前后端版本，并将本次发布标为失败；恢复也失败时会明确记录 `rollback_failed`。强制结束发布进程或服务器失联不属于自动恢复保证，仍需检查部署记录。基础系统软件、证书、Nginx 配置仍按 [VPS 部署指南](../VPS_DEPLOY.md) 初始化。
 
-按实际端口、服务名和流量修改 `/etc/video-parser/monitor.json`。该文件及监控状态都留在服务器；本地配置放到已忽略的 `docs/`，不要提交真实地址或运行记录。模板使用动态系统用户，只读业务服务日志，状态目录由 systemd 管理；配置文件通过 `systemd-journal` 组提供读取权限。
+按实际端口、服务名和流量修改 `/etc/video-parser/monitor.json`。该文件及监控状态都留在服务器；本地配置放到已忽略的 `docs/`，不要提交真实地址或运行记录。模板使用动态系统用户，只读业务服务日志，状态目录由 systemd 管理。新配置以 root 所有、`0600` 权限创建，systemd 使用 `LoadCredential` 向监控进程提供只读副本；现有配置及其权限保留。`/etc/video-parser` 可继续保持基础部署的 `0750` 权限，监控不加入业务服务组，也无需读取 `server.env`。
 
 ```bash
 # 最近采样、告警和恢复记录

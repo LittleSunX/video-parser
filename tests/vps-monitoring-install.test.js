@@ -157,6 +157,23 @@ test('repeated deployment preserves custom thresholds, retention settings and sa
   expect(await fs.readFile(statePath)).toEqual(state)
 })
 
+test('installation preserves the private API directory and creates a root-only monitor config', async () => {
+  const f = await fixture()
+  const folder = join(f.etc, 'video-parser')
+  await fs.mkdir(folder, { mode: 0o750 })
+  const before = await fs.stat(folder)
+  const operation = await prepareMonitoring(f.entries, f.options)
+  await operation.install()
+  const after = await fs.stat(folder)
+  expect(after.mode).toBe(before.mode)
+  expect(after.uid).toBe(before.uid)
+  expect(after.gid).toBe(before.gid)
+  if (process.platform !== 'win32') {
+    expect(after.mode & 0o777).toBe(0o750)
+    expect((await fs.stat(join(folder, 'monitor.json'))).mode & 0o777).toBe(0o600)
+  }
+})
+
 test.each([false, true])(
   'failed sample restores the previous monitoring installation (legacy=%s)',
   async (legacy) => {
@@ -203,8 +220,8 @@ test('legacy archives do not uninstall monitoring, incomplete new archives and o
   const partial = new Map(f.entries)
   partial.delete('operations/video-parser-monitor.timer')
   await expect(prepareMonitoring(partial, f.options)).rejects.toThrow('Incomplete')
-  const run = vi.fn(async () => ({ stdout: 'systemd 244\n' }))
-  await expect(prepareMonitoring(f.entries, { ...f.options, run })).rejects.toThrow('245')
+  const run = vi.fn(async () => ({ stdout: 'systemd 246\n' }))
+  await expect(prepareMonitoring(f.entries, { ...f.options, run })).rejects.toThrow('247')
   expect(run).toHaveBeenCalledTimes(1)
 })
 

@@ -295,6 +295,8 @@ export async function deployVps(config, state, run = runCommand, bundleDirectory
   }
   const temporary = await mkdtemp(join(tmpdir(), 'video-parser-vps-'))
   const remote = `video-parser-upload/${randomUUID()}`
+  // Upload and cleanup must use the same inventory as remote helpers evolve.
+  const releaseHelpers = ['apply-vps-release.mjs', 'install-vps-monitoring.mjs']
   let uploaded = false
   try {
     const bundle = await prepareBundle(plan.commit, temporary, bundleDirectory, run)
@@ -307,8 +309,7 @@ export async function deployVps(config, state, run = runCommand, bundleDirectory
       [
         ...scp.args,
         bundle.archive,
-        join(repositoryRoot, 'deploy/apply-vps-release.mjs'),
-        join(repositoryRoot, 'deploy/install-vps-monitoring.mjs'),
+        ...releaseHelpers.map((name) => join(repositoryRoot, 'deploy', name)),
         `${scp.target}:${remote}/`,
       ],
       { timeout: 120_000 },
@@ -356,7 +357,7 @@ export async function deployVps(config, state, run = runCommand, bundleDirectory
     }
   } finally {
     if (uploaded) {
-      const files = ['release.tar.gz', 'apply-vps-release.mjs'].map((file) =>
+      const files = ['release.tar.gz', ...releaseHelpers].map((file) =>
         shellQuote(remote + '/' + file),
       )
       await run(
