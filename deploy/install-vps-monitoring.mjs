@@ -75,8 +75,8 @@ export async function prepareMonitoring(
   }
   const command = (args) => run('/usr/bin/systemctl', args)
   const version = await command(['--version'])
-  if (Number(/^systemd (\d+)/.exec(version.stdout)?.[1] ?? 0) < 245)
-    throw new Error('Monitoring requires systemd 245 or newer')
+  if (Number(/^systemd (\d+)/.exec(version.stdout)?.[1] ?? 0) < 247)
+    throw new Error('Monitoring requires systemd 247 or newer (LoadCredential)')
   const group = await run('/usr/bin/getent', ['group', 'systemd-journal'])
   const groupFields = group.stdout.trim().split(':')
   const gid = Number(groupFields[2])
@@ -112,7 +112,7 @@ export async function prepareMonitoring(
       join(etc, 'systemd/journald@video-parser.conf'),
       true,
     ],
-    ['operations/monitor.example.json', join(etc, 'video-parser/monitor.json'), true, 0o640],
+    ['operations/monitor.example.json', join(etc, 'video-parser/monitor.json'), true, 0o600],
   ]
   const changes = []
   for (const [name, path, preserve, mode = 0o644] of specs) {
@@ -123,7 +123,7 @@ export async function prepareMonitoring(
       body: entries.get(name).body,
       mode,
       uid: owner.uid,
-      gid: mode === 0o640 ? gid : owner.gid,
+      gid: owner.gid,
     }
     if (
       before &&

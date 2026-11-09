@@ -295,5 +295,44 @@ test.each([
       fileURLToPath(new URL('../deploy/apply-vps-release.mjs', import.meta.url)),
     )
     expect(run.mock.calls[3][1].at(-1)).toContain(bundle.sha256)
+    for (const name of ['release.tar.gz', 'apply-vps-release.mjs', 'install-vps-monitoring.mjs'])
+      expect(run.mock.calls[4][1].at(-1)).toContain('/' + name + "'")
+  },
+)
+
+test.each([72, 73, 1])(
+  'failed remote apply (%s) removes every uploaded helper before removing its directory',
+  async (exitCode) => {
+    const root = await temporary()
+    await artifacts(root)
+    const bundleDir = await temporary()
+    await createVpsArchive(root, bundleDir, commit)
+    const target = validateVpsConfig(config, root)
+    await writeFile(target.identityFile, 'fixture')
+    await writeFile(target.knownHostsFile, 'fixture')
+    const remoteFiles = new Set()
+    const warning = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const run = vi.fn(async (binary, args) => {
+      if (binary === 'scp') {
+        for (const path of args.filter((value) => /\.(mjs|tar\.gz)$/.test(value)))
+          remoteFiles.add(basename(path))
+      }
+      if (binary !== 'ssh') return
+      const command = args.at(-1)
+      if (command.startsWith('rm -f -- ')) {
+        for (const [, path] of command.split(' && ')[0].matchAll(/'([^']+)'/g))
+          remoteFiles.delete(basename(path))
+        if (remoteFiles.size) throw new Error('Remote directory not empty')
+      } else if (command.includes('--archive')) {
+        throw Object.assign(new Error('Remote apply failed'), { exitCode })
+      }
+    })
+    try {
+      await expect(deployVps(target, { commit, dirty: false }, run, bundleDir)).rejects.toThrow()
+      expect(remoteFiles.size).toBe(0)
+      expect(warning).not.toHaveBeenCalled()
+    } finally {
+      warning.mockRestore()
+    }
   },
 )
