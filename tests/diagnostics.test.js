@@ -730,5 +730,10 @@ test('first usable timing is emitted once and final timing retains quality and k
     hasMusic: true,
   })
   expect(JSON.stringify(logs.mock.calls)).not.toMatch(/PRIVATE_|signature=/)
+  expect(
+    logs.mock.calls.every(
+      ([message]) => typeof message === 'string' && message.trim().startsWith('{'),
+    ),
+  ).toBe(true)
   expect(vi.getTimerCount()).toBe(0)
 })

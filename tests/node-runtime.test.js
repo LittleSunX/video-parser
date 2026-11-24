@@ -153,3 +153,18 @@ test('fixed windows share per-client operation budgets and expire at 60 seconds'
     limiter.close()
   }
 })
+
+test('default limiter uses a monotonic clock and stays available when Date.now steps backward', async () => {
+  const { createRateLimiter } = await limiterModule()
+  const limiter = createRateLimiter()
+  const spy = vi.spyOn(Date, 'now')
+  try {
+    spy.mockReturnValue(2_000_000_000_000)
+    expect(await limiter.limit('parse', '192.0.2.10')).toEqual({ status: 'allowed' })
+    spy.mockReturnValue(1_000_000_000_000)
+    expect(await limiter.limit('parse', '192.0.2.10')).toEqual({ status: 'allowed' })
+  } finally {
+    spy.mockRestore()
+    limiter.close()
+  }
+})

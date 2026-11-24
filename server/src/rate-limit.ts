@@ -7,7 +7,7 @@ export function createRateLimiter(
     cleanupIntervalMs?: number
   } = {},
 ) {
-  const now = options.now ?? Date.now
+  const now = options.now ?? (() => Math.floor(performance.now()))
   const maxKeys = options.maxKeys ?? 10_000
   const cleanupIntervalMs = options.cleanupIntervalMs ?? 30_000
   if (

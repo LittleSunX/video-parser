@@ -104,6 +104,15 @@ test('incremental archive preserves Unicode names and cancellation before saving
   expect(saveBlob).not.toHaveBeenCalled()
 })
 
+test.each(['', '../escape.jpg', 'nested/file.jpg', 'nested\\file.jpg', 'bad\u0000.jpg'])(
+  'archive creation rejects unsafe entry filename %j',
+  async (badName) => {
+    await expect(
+      createMediaArchive(new Map([[badName, new Blob(['x'])]]), new AbortController().signal),
+    ).rejects.toThrow('归档文件名无效')
+  },
+)
+
 test('a 31 MiB file succeeds with the 32 MiB default without whole-file arrayBuffer reads', async () => {
   const size = 31 * 1024 * 1024
   global.fetch = async () => {

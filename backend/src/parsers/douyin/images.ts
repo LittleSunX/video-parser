@@ -1,3 +1,4 @@
+import { isSafeHttpUrl } from '../../../../shared/video-contract'
 import type { ImageAsset } from '../../types/video'
 import type { ParsedMediaResult } from './types'
 import { normalizeUrl, extractFirstUrl, toPlayableUrl } from './text'
@@ -30,10 +31,11 @@ export function mergeImageAssets(first: ImageAsset[], second: ImageAsset[]): Ima
     for (const incoming of [...matches.slice(1), asset]) {
       const preferIncoming =
         !merged.url || (!!incoming.url && !merged.watermarkFree && incoming.watermarkFree)
+      const mergedLive = merged.livePhotoUrl || incoming.livePhotoUrl
       merged = {
         url: preferIncoming ? incoming.url : merged.url,
         watermarkFree: preferIncoming ? incoming.watermarkFree : merged.watermarkFree,
-        livePhotoUrl: merged.livePhotoUrl || incoming.livePhotoUrl,
+        ...(mergedLive ? { livePhotoUrl: mergedLive } : {}),
       }
       for (const key of keys(incoming)) identity.add(key)
     }
@@ -72,19 +74,14 @@ export function extractImageAssetsWithCompleteness(input: unknown): {
     const selected = selectBestImageUrl(object)
     const livePhotoUrl = extractLivePhotoUrl(object)
 
-    const normalizedImage = selected?.url ? normalizeUrl(selected.url) : ''
-    const normalizedLive = livePhotoUrl ? toPlayableUrl(normalizeUrl(livePhotoUrl)) : undefined
-    if (selected) {
-      console.info(
-        '[DouyinParser] selected image source:',
-        selected.source,
-        'watermarkFree=' + selected.watermarkFree,
-      )
-    }
+    const rawImage = selected?.url ? normalizeUrl(selected.url).trim() : ''
+    const normalizedImage = isSafeHttpUrl(rawImage) ? rawImage : ''
+    const rawLive = livePhotoUrl ? toPlayableUrl(normalizeUrl(livePhotoUrl).trim()) : undefined
+    const normalizedLive = rawLive && isSafeHttpUrl(rawLive) ? rawLive : undefined
 
     const asset: ImageAsset = {
       url: normalizedImage,
-      livePhotoUrl: normalizedLive,
+      ...(normalizedLive ? { livePhotoUrl: normalizedLive } : {}),
       watermarkFree: selected?.watermarkFree ?? false,
     }
     const uri = extractUri(object)
@@ -144,7 +141,7 @@ export function selectBestImageUrl(image: Record<string, unknown>): ImageUrlCand
   candidates.sort((left, right) => {
     if (left.watermarkFree !== right.watermarkFree) return left.watermarkFree ? -1 : 1
     if (left.rank !== right.rank) return left.rank - right.rank
-    const secure = (url: string) => /^https:\/\//i.test(url)
+    const secure = (url: string) => isSafeHttpUrl(url, true)
     if (secure(left.url) !== secure(right.url)) return secure(left.url) ? -1 : 1
     return imageFormatRank(left.url) - imageFormatRank(right.url)
   })
@@ -154,8 +151,8 @@ export function selectBestImageUrl(image: Record<string, unknown>): ImageUrlCand
 
 export function extractAllUrls(input: unknown): string[] {
   if (typeof input === 'string') {
-    const value = normalizeUrl(input)
-    return /^https?:\/\//i.test(value) ? [value] : []
+    const value = normalizeUrl(input).trim()
+    return isSafeHttpUrl(value) ? [value] : []
   }
 
   if (Array.isArray(input)) {
@@ -168,7 +165,7 @@ export function extractAllUrls(input: unknown): string[] {
     for (const key of ['url_list', 'urlList', 'url', 'src']) {
       if (key in object) {
         const urls = extractAllUrls(object[key])
-        if (urls.some((url) => /^https:\/\//i.test(url))) return [...fallback, ...urls]
+        if (urls.some((url) => isSafeHttpUrl(url, true))) return [...fallback, ...urls]
         if (fallback.length === 0) fallback = urls
       }
     }
@@ -234,11 +231,14 @@ export function extractLivePhotoUrl(image: Record<string, unknown>): string | un
     const uri = extractUri(address)
 
     if (uri) {
-      if (/^https?:\/\//i.test(uri)) {
-        const candidate = extractFirstUrl([uri, address])
-        return candidate && !/\.mp3(?:$|\?)/i.test(candidate) ? candidate : uri
+      if (/^https?:/i.test(uri)) {
+        const candidate = [extractFirstUrl([uri, address]), extractFirstUrl(uri)].find(
+          (url) => !!url && !/\.mp3(?:$|\?)/i.test(url),
+        )
+        if (candidate) return candidate
+      } else if (!/mp3/i.test(uri)) {
+        return buildLivePhotoPlayUrl(uri)
       }
-      if (!/mp3/i.test(uri)) return buildLivePhotoPlayUrl(uri)
     }
 
     const directUrl = extractFirstUrl(address)
@@ -247,7 +247,11 @@ export function extractLivePhotoUrl(image: Record<string, unknown>): string | un
 
   const vid = typeof video.vid === 'string' ? video.vid.trim() : ''
   if (vid && !/mp3/i.test(vid)) {
-    return /^https?:\/\//i.test(vid) ? vid : buildLivePhotoPlayUrl(vid)
+    if (/^https?:/i.test(vid)) {
+      const candidate = extractFirstUrl(vid)
+      return candidate && !/\.mp3(?:$|\?)/i.test(candidate) ? candidate : undefined
+    }
+    return buildLivePhotoPlayUrl(vid)
   }
 
   return undefined

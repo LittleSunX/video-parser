@@ -1,5 +1,6 @@
 import { computed, ref, onScopeDispose, type Ref } from 'vue'
 import type { VideoInfo } from '../types/video'
+import { sanitizeFilenamePart } from '../../../shared/filename'
 import {
   downloadMediaArchive,
   createBatchSession,
@@ -137,9 +138,10 @@ export function useBatchDownload({
     batchController = controller
     phase.value = { kind: 'receiving' }
     try {
+      const safeId = sanitizeFilenamePart(current.videoId, 64) || 'archive'
       await downloadMediaArchive(
         jobs,
-        `抖音_${current.videoId}_${preferLive ? '动态优先' : '原图'}.zip`,
+        `抖音_${safeId}_${preferLive ? '动态优先' : '原图'}.zip`,
         controller.signal,
         (message) => {
           if (batchController === controller) batchProgress.value = message

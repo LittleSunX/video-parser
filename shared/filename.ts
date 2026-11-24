@@ -10,3 +10,16 @@ export function truncateFilename(value: string, maxLength: number): string {
   }
   return result
 }
+
+/** 清理文件名片段中的控制字符、路径分隔符与非法符号，并限制长度。 */
+export function sanitizeFilenamePart(value: string | undefined, maxLength = 48): string {
+  if (typeof value !== 'string') return ''
+  return truncateFilename(
+    value
+      .replace(/[<>:"/\\|?*\u0000-\u001F\u007F]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/[. ]+$/g, ''),
+    maxLength,
+  ).replace(/[. ]+$/g, '')
+}

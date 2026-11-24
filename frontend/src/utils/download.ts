@@ -1,5 +1,6 @@
 import type { VideoInfo } from '../types/video'
-import { truncateFilename } from '../../../shared/filename'
+import { sanitizeFilenamePart, truncateFilename } from '../../../shared/filename'
+import { isSafeHttpUrl } from '../../../shared/video-contract'
 
 export interface NativeDownloadError {
   code: string
@@ -55,6 +56,7 @@ export async function copyText(text: string): Promise<void> {
 // 跨域媒体由浏览器直接打开，避免视频流量经过 Worker。
 // download 属性无法保证跨域下载或文件名，因此保留代理下载入口。
 export function openDirectDownload(url: string): void {
+  if (!isSafeHttpUrl(url)) return
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.target = '_blank'
@@ -125,26 +127,19 @@ export function triggerDownload(
 }
 
 function buildFilename(video: VideoInfo, extension: string, suffix?: string): string {
-  const parts = [
+  const safeId = sanitizeFilenamePart(video.videoId, 64) || 'media'
+  const cleanSuffix = suffix ? sanitizeFilenamePart(suffix, 32) : ''
+  const tail = [safeId, cleanSuffix].filter(Boolean).join('_')
+  const headParts = [
     '抖音',
-    sanitizeFilePart(video.author ?? ''),
-    sanitizeFilePart(video.title),
-    video.videoId,
-    suffix,
+    sanitizeFilenamePart(video.author ?? ''),
+    sanitizeFilenamePart(video.title),
   ].filter(Boolean)
-
-  const basename = truncateFilename(parts.join('_'), 150).replace(/[. ]+$/g, '') || video.videoId
+  const headLimit = Math.max(0, 150 - (tail ? tail.length + 1 : 0))
+  const head =
+    headLimit > 0 ? truncateFilename(headParts.join('_'), headLimit).replace(/[_.\s]+$/g, '') : ''
+  const joined = [head, tail].filter(Boolean).join('_')
+  const basename = truncateFilename(joined, 150).replace(/[. ]+$/g, '') || safeId
 
   return basename + '.' + extension
-}
-
-function sanitizeFilePart(value: string): string {
-  return truncateFilename(
-    value
-      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .replace(/[. ]+$/g, ''),
-    48,
-  )
 }

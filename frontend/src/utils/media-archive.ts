@@ -18,6 +18,9 @@ export async function createMediaArchive(
   try {
     for (const [filename, blob] of files) {
       signal.throwIfAborted()
+      if (!filename || /[\\/]|^\.\.?$|[\u0000-\u001F\u007F]/.test(filename)) {
+        throw new Error('归档文件名无效')
+      }
       const entry = new ZipPassThrough(filename)
       zip.add(entry)
       // 定长切片避免依赖不同浏览器 Blob.stream() 的分块大小。

@@ -6,6 +6,7 @@ import { extractDouyinVideoId } from './douyin-id'
 export { extractDouyinVideoId } from './douyin-id'
 
 const SUPPORTED_HOST_SUFFIXES = ['douyin.com', 'iesdouyin.com']
+export const PARSER_HOST_SUFFIXES = ['douyin.com', 'iesdouyin.com', 'amemv.com', 'snssdk.com']
 
 export const MOBILE_USER_AGENT =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
@@ -27,6 +28,20 @@ export function extractUrl(input: string): URL {
 }
 
 export function validateSupportedUrl(url: URL): void {
+  validateAllowedHostUrl(
+    url,
+    SUPPORTED_HOST_SUFFIXES,
+    'UNSUPPORTED_PLATFORM',
+    '当前第一版仅支持抖音链接',
+  )
+}
+
+function validateAllowedHostUrl(
+  url: URL,
+  allowedSuffixes: readonly string[],
+  disallowedCode = 'INVALID_URL',
+  disallowedMessage = '上游重定向地址不在允许的域名中',
+): void {
   if (url.protocol !== 'https:') {
     throw new AppError('INVALID_URL', '仅支持 HTTPS 链接')
   }
@@ -36,13 +51,59 @@ export function validateSupportedUrl(url: URL): void {
   }
 
   const hostname = url.hostname.toLowerCase()
-  const allowed = SUPPORTED_HOST_SUFFIXES.some(
+  const allowed = allowedSuffixes.some(
     (suffix) => hostname === suffix || hostname.endsWith('.' + suffix),
   )
 
   if (!allowed) {
-    throw new AppError('UNSUPPORTED_PLATFORM', '当前第一版仅支持抖音链接')
+    throw new AppError(disallowedCode, disallowedMessage)
   }
+}
+
+export interface ParserGetOptions {
+  headers: Record<string, string>
+  signal?: AbortSignal
+  allowedHosts?: readonly string[]
+}
+
+export interface ParserGetResponse {
+  response: Response
+  finalUrl: string
+}
+
+export async function fetchParserGet(
+  initialUrl: string | URL,
+  { headers, signal, allowedHosts = SUPPORTED_HOST_SUFFIXES }: ParserGetOptions,
+): Promise<ParserGetResponse> {
+  let current = typeof initialUrl === 'string' ? new URL(initialUrl) : initialUrl
+
+  for (let index = 0; index <= 6; index += 1) {
+    signal?.throwIfAborted()
+    validateAllowedHostUrl(current, allowedHosts)
+    const response = await fetch(current.toString(), {
+      method: 'GET',
+      headers,
+      redirect: 'manual',
+      signal,
+    })
+    signal?.throwIfAborted()
+
+    if (![301, 302, 303, 307, 308].includes(response.status)) {
+      return {
+        response,
+        finalUrl: response.url || (index > 0 ? current.toString() : ''),
+      }
+    }
+
+    const location = response.headers.get('location')
+    if (!response.bodyUsed) void response.body?.cancel().catch(() => {})
+    if (!location) {
+      throw new AppError('REQUEST_FAILED', '上游重定向缺少目标地址', 502)
+    }
+    current = new URL(location, current)
+  }
+
+  throw new AppError('REQUEST_FAILED', '上游重定向次数过多', 502)
 }
 
 export async function resolveSupportedUrl(inputUrl: URL, signal?: AbortSignal): Promise<URL> {

@@ -202,3 +202,25 @@ test('version loader rejects incomplete, malformed and foreign metadata rather t
     expect(() => validateNodeVersion(input)).toThrow('Invalid build metadata')
   await expect(loadVersion(resolve(dir, 'missing.json'))).rejects.toThrow('Invalid build metadata')
 })
+
+test('backend exports and shared tsconfig paths stay in sync without per-runtime duplication', async () => {
+  const pkg = JSON.parse(await readFile(join(root, 'backend/package.json'), 'utf8'))
+  const sharedRaw = (await readFile(join(root, 'backend/tsconfig.paths.json'), 'utf8')).replace(
+    /^\s*\/\/.*$/gm,
+    '',
+  )
+  const shared = JSON.parse(sharedRaw)
+  const expectedPaths = Object.fromEntries(
+    Object.entries(pkg.exports).map(([subpath, target]) => [
+      `${pkg.name}/${subpath.replace(/^\.\//, '')}`,
+      [target],
+    ]),
+  )
+  expect(shared.compilerOptions.paths).toEqual(expectedPaths)
+
+  for (const runtimeConfig of ['server/tsconfig.json', 'worker/tsconfig.json']) {
+    const parsed = JSON.parse(await readFile(join(root, runtimeConfig), 'utf8'))
+    expect(parsed.extends).toBe('../backend/tsconfig.paths.json')
+    expect(parsed.compilerOptions.paths).toBeUndefined()
+  }
+})

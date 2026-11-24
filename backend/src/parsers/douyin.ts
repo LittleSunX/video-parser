@@ -1,15 +1,20 @@
+import { isSafeHttpUrl } from '../../../shared/video-contract'
 import { readUpstreamText } from '../utils/upstream-body'
 import { createUpstreamAttempt, type Diagnostics } from '../utils/diagnostics'
 import { AppError } from '../errors/app-error'
 import type { VideoInfo } from '../types/video'
-import { extractDouyinVideoId, MOBILE_USER_AGENT } from '../utils/url'
+import {
+  extractDouyinVideoId,
+  fetchParserGet,
+  MOBILE_USER_AGENT,
+  PARSER_HOST_SUFFIXES,
+} from '../utils/url'
 import type { VideoParser } from './base'
 import type { ParsedMediaResult } from './douyin/types'
 import { mapItemToVideoInfo } from './douyin/map-item'
 import { findMediaItem, findFilterReason } from './douyin/items'
 import { extractRouterData, pageMatchesExpectedVideo, extractMeta } from './douyin/page'
 import { runParseStrategies } from './douyin/strategies'
-import { normalizeText, normalizeUrl } from './douyin/text'
 import { createAttemptScheduler, type AttemptScheduler } from './douyin/attempt-scheduler'
 import { runOrderedCandidates } from './douyin/ordered-candidates'
 
@@ -99,12 +104,14 @@ export class DouyinParser implements VideoParser {
         : AbortSignal.timeout(8000)
       try {
         signal?.throwIfAborted()
-        const response = await diagnostic.response(() =>
-          fetch(endpoint, {
-            headers: buildWebDetailHeaders(),
-            redirect: 'follow',
-            signal: requestSignal,
-          }),
+        const response = await diagnostic.response(
+          async () =>
+            (
+              await fetchParserGet(endpoint, {
+                headers: buildWebDetailHeaders(),
+                signal: requestSignal,
+              })
+            ).response,
         )
 
         if (!response.ok) {
@@ -188,13 +195,14 @@ export class DouyinParser implements VideoParser {
         : AbortSignal.timeout(10000)
       try {
         signal?.throwIfAborted()
-        const response = await diagnostic.response(() =>
-          fetch(candidate, {
-            method: 'GET',
-            headers: buildPageHeaders(),
-            redirect: 'follow',
-            signal: requestSignal,
-          }),
+        const response = await diagnostic.response(
+          async () =>
+            (
+              await fetchParserGet(candidate, {
+                headers: buildPageHeaders(),
+                signal: requestSignal,
+              })
+            ).response,
         )
 
         if (!response.ok) {
@@ -294,15 +302,18 @@ export class DouyinParser implements VideoParser {
         const requestSignal = AbortSignal.any([attemptSignal, AbortSignal.timeout(8000)])
         try {
           attemptSignal.throwIfAborted()
-          const response = await diagnostic.response(() =>
-            fetch(endpoints[index], {
-              headers: {
-                'User-Agent': MOBILE_USER_AGENT,
-                Accept: 'application/json, text/plain, */*',
-              },
-              redirect: 'follow',
-              signal: requestSignal,
-            }),
+          const response = await diagnostic.response(
+            async () =>
+              (
+                await fetchParserGet(endpoints[index], {
+                  headers: {
+                    'User-Agent': MOBILE_USER_AGENT,
+                    Accept: 'application/json, text/plain, */*',
+                  },
+                  signal: requestSignal,
+                  allowedHosts: PARSER_HOST_SUFFIXES,
+                })
+              ).response,
           )
 
           if (!response.ok) {
@@ -352,13 +363,15 @@ export class DouyinParser implements VideoParser {
       : AbortSignal.timeout(8000)
     try {
       signal?.throwIfAborted()
-      const response = await diagnostic.response(() =>
-        fetch(sourceUrl.toString(), {
+      let finalUrl = ''
+      const response = await diagnostic.response(async () => {
+        const upstream = await fetchParserGet(sourceUrl, {
           headers: buildPageHeaders(),
-          redirect: 'follow',
           signal: requestSignal,
-        }),
-      )
+        })
+        finalUrl = upstream.finalUrl
+        return upstream.response
+      })
 
       if (!response.ok) {
         diagnostic.result('http_error')
@@ -372,18 +385,19 @@ export class DouyinParser implements VideoParser {
       const html = await diagnostic.read(() => readUpstreamText(response, requestSignal))
 
       return diagnostic.extract(() => {
-        if (!pageMatchesExpectedVideo(response.url, html, videoId)) {
+        if (!pageMatchesExpectedVideo(finalUrl, html, videoId)) {
           diagnostic.result('page_mismatch')
           throw new AppError('VIDEO_NOT_FOUND', '当前页面返回的视频 ID 与目标视频不一致', 422)
         }
 
-        const title = extractMeta(html, 'og:title') ?? '抖音视频'
-        const author = extractMeta(html, 'author') ?? undefined
-        const cover = extractMeta(html, 'og:image') ?? undefined
+        const title = collapseWhitespace(extractMeta(html, 'og:title') ?? '抖音视频')
+        const rawAuthor = extractMeta(html, 'author')
+        const author = rawAuthor ? collapseWhitespace(rawAuthor) : ''
+        const cover = normalizeHttpMetaUrl(extractMeta(html, 'og:image'))
         const videoUrl =
-          extractMeta(html, 'og:video:secure_url') ??
-          extractMeta(html, 'og:video') ??
-          extractMeta(html, 'twitter:player:stream')
+          normalizeHttpMetaUrl(extractMeta(html, 'og:video:secure_url')) ??
+          normalizeHttpMetaUrl(extractMeta(html, 'og:video')) ??
+          normalizeHttpMetaUrl(extractMeta(html, 'twitter:player:stream'))
 
         if (!videoUrl) {
           diagnostic.result('resource_missing')
@@ -401,10 +415,10 @@ export class DouyinParser implements VideoParser {
             mediaType: 'video',
             videoId,
             sourceUrl: sourceUrl.toString(),
-            title: normalizeText(title),
-            author: author ? normalizeText(author) : undefined,
-            cover: cover ? normalizeUrl(cover) : undefined,
-            videoUrl: normalizeUrl(videoUrl),
+            title: title || '抖音视频',
+            ...(author ? { author } : {}),
+            ...(cover ? { cover } : {}),
+            videoUrl,
           },
         }
         diagnostic.result('success')
@@ -438,4 +452,19 @@ function buildPageHeaders(): Record<string, string> {
     'Accept-Language': 'zh-CN,zh;q=0.9',
     Referer: 'https://www.douyin.com/',
   }
+}
+
+function collapseWhitespace(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+/** extractMeta 已完成一次 HTML 实体解码，此处仅还原转义斜杠并校验 HTTP(S) 协议。 */
+function normalizeHttpMetaUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const normalized = value
+    .replace(/\\u002F/gi, '/')
+    .replace(/\\u0026/gi, '&')
+    .replace(/\\\//g, '/')
+    .trim()
+  return isSafeHttpUrl(normalized) ? normalized : undefined
 }

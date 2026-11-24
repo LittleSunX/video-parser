@@ -1,7 +1,13 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { extractFirstUrl } from '../backend/src/parsers/douyin/text'
+import {
+  decodeHtmlEntities,
+  extractFirstUrl,
+  extractHttpsUrls,
+  toPlayableUrl,
+} from '../backend/src/parsers/douyin/text'
 import { mapItemToVideoInfo } from '../backend/src/parsers/douyin/map-item'
 import { extractLivePhotoUrl, selectBestImageUrl } from '../backend/src/parsers/douyin/images'
+import { validateVideoInfo } from '../shared/video-contract'
 import worker from '../worker/src/index'
 
 const id = '7690537093143539065'
@@ -172,4 +178,109 @@ test('live photo address quality order and MP3 fallback exclusion are preserved'
       video: { play_addr: { url_list: ['https://sf3.douyinstatic.com/audio.mp3'] } },
     }),
   ).toBeUndefined()
+})
+
+test.each([
+  [
+    'first parameter',
+    'https://v.douyinvod.com/playwm/?watermark=1&signature=a%2Fb&line=0',
+    'https://v.douyinvod.com/play/?signature=a%2Fb&line=0',
+  ],
+  [
+    'middle parameter',
+    'https://v.douyinvod.com/playwm/?video_id=123&watermark=1&signature=a%2Fb',
+    'https://v.douyinvod.com/play/?video_id=123&signature=a%2Fb',
+  ],
+  [
+    'trailing parameter',
+    'https://v.douyinvod.com/playwm/?video_id=123&watermark=1',
+    'https://v.douyinvod.com/play/?video_id=123',
+  ],
+  [
+    'sole parameter',
+    'https://v.douyinvod.com/playwm/?watermark=1',
+    'https://v.douyinvod.com/play/',
+  ],
+  [
+    'repeated watermark parameters and unrelated watermark_free flag',
+    'https://v.douyinvod.com/play/?watermark=1&watermark=0&watermark_free=1&sig=x%2By',
+    'https://v.douyinvod.com/play/?watermark_free=1&sig=x%2By',
+  ],
+  [
+    'watermark removal preserves unrelated empty query segments',
+    'https://v.douyinvod.com/play/?a=1&&b=2&watermark=1',
+    'https://v.douyinvod.com/play/?a=1&&b=2',
+  ],
+])('toPlayableUrl removes watermark cleanly when it is the %s', (_label, input, expected) => {
+  expect(toPlayableUrl(input)).toBe(expected)
+})
+
+test.each([
+  'https://v26.douyinvod.com/high.mp4?',
+  'https://v26.douyinvod.com/high.mp4?a=1&',
+  'https://v26.douyinvod.com/high.mp4?a=1&&signature=a%2Fb',
+  'https://v26.douyinvod.com/high.mp4?watermark_free=1&a=1&&b=2',
+])('toPlayableUrl keeps non-watermarked signed URLs and stream metadata intact: %s', (signed) => {
+  const mirror = 'https://v11.douyinvod.com/high.mp4?signature=c%2Fd'
+  expect(toPlayableUrl(signed)).toBe(signed)
+  const mapped = mapItemToVideoInfo(
+    {
+      aweme_id: id,
+      video: {
+        bit_rate: [
+          { play_addr: { url_list: [signed, mirror], width: 1080, height: 1920, data_size: 4096 } },
+        ],
+      },
+    },
+    source,
+    id,
+  ).video
+  expect(mapped).toMatchObject({
+    videoUrl: signed,
+    videoUrlAlternatives: [mirror],
+    videoSize: 4096,
+  })
+})
+
+test('decodeHtmlEntities decodes entities in a single pass without double-decoding', () => {
+  expect(
+    decodeHtmlEntities(
+      '&amp;lt;script&amp;gt; &amp;quot;A&amp;#39;B&amp;#x27;C&amp;quot; &lt;&gt;',
+    ),
+  ).toBe('&lt;script&gt; &quot;A&#39;B&#x27;C&quot; <>')
+})
+
+test('candidate extractors skip invalid URLs and omit invalid optional cover/music fields', () => {
+  const bad = [
+    'https:relative/path',
+    'https:/same-origin/path',
+    'https://user:pass@v.douyinvod.com/secret.mp4',
+    'https://@v.douyinvod.com/secret.mp4',
+    'https://',
+  ]
+  expect(extractFirstUrl([...bad, https])).toBe(https)
+  expect(extractHttpsUrls([...bad, https], 3)).toEqual([https])
+  expect(
+    selectBestImageUrl({ origin_image: [...bad, 'https://p.douyinpic.com/ok.jpg'] })?.url,
+  ).toBe('https://p.douyinpic.com/ok.jpg')
+  expect(extractLivePhotoUrl({ video: { play_addr: { uri: bad[2], url_list: [https] } } })).toBe(
+    https,
+  )
+
+  const mapped = mapItemToVideoInfo(
+    {
+      aweme_id: id,
+      video: {
+        play_addr: { url_list: [bad[0], https] },
+        cover: { url_list: bad },
+      },
+      music: { title: 'BGM', play_url: { url_list: bad } },
+    },
+    source,
+    id,
+  ).video
+  expect(mapped.videoUrl).toBe(https)
+  expect('cover' in mapped).toBe(false)
+  expect('musicUrl' in mapped).toBe(false)
+  expect(validateVideoInfo(mapped)).toEqual({ valid: true, value: mapped })
 })
