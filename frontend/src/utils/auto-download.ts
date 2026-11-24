@@ -2,6 +2,7 @@ import { canRetryDirectSource, MediaDownloadError, responseDownloadError } from 
 import { validateFullMediaRange } from '../../../shared/media-response'
 import { SINGLE_BUFFER_BYTES, VIDEO_BUFFER_BYTES } from './download-buffer'
 import { MAX_VIDEO_URL_ALTERNATIVES } from '../../../shared/video'
+import { isSafeHttpUrl } from '../../../shared/video-contract'
 
 const incompleteMedia = () =>
   new MediaDownloadError('INVALID_MEDIA', '媒体响应不完整，请重新下载或重新解析')
@@ -20,9 +21,14 @@ interface DownloadOptions {
   onProgress: (received: number, total?: number) => void
 }
 
+function isAllowedFetchUrl(value: string): boolean {
+  return isSafeHttpUrl(value) || (value.startsWith('/') && !value.startsWith('//'))
+}
+
 export function mediaDownloadUrls(url: string, alternativeUrls: string[] = []): string[] {
+  const primary = isAllowedFetchUrl(url) ? [url] : []
   return [
-    ...new Set([url, ...alternativeUrls.filter((value) => /^https:\/\//i.test(value))]),
+    ...new Set([...primary, ...alternativeUrls.filter((value) => isSafeHttpUrl(value, true))]),
   ].slice(0, MAX_VIDEO_URL_ALTERNATIVES + 1)
 }
 
@@ -34,6 +40,7 @@ export async function fetchMediaBlob(
   maxBytes = kind === 'video' ? VIDEO_BUFFER_BYTES : SINGLE_BUFFER_BYTES,
 ): Promise<Blob> {
   const urls = mediaDownloadUrls(url, options.alternativeUrls)
+  if (!urls.length) throw new MediaDownloadError('INVALID_MEDIA', '媒体地址无效，请重新解析')
   let lastError: unknown
   for (const candidate of urls) {
     options.signal.throwIfAborted()
@@ -209,16 +216,6 @@ function releaseReader(reader: ReadableStreamDefaultReader<Uint8Array>) {
     /* 媒体流已中止。 */
   }
   release()
-}
-
-export async function downloadDirectVideo(
-  url: string,
-  filename: string,
-  options: DownloadOptions,
-): Promise<void> {
-  const blob = await fetchMediaBlob(url, options)
-  options.signal.throwIfAborted()
-  saveBlob(blob, filename)
 }
 
 export function saveBlob(

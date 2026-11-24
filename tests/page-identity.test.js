@@ -218,3 +218,72 @@ test('full parse preserves meta-only fallback when the final URL still identifie
     parseStatus: 'complete',
   })
 })
+
+test('meta fallback rejects non-HTTP(S) media schemes, drops unsafe covers and decodes entities once', async () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {})
+  vi.stubGlobal('fetch', async (url) => {
+    if (String(url).includes('/aweme/v1/web/') || String(url).includes('/aweme/v1/feed/'))
+      return new Response('', { status: 503 })
+    const response = new Response('<meta property="og:video" content="javascript:alert(1)">', {
+      headers: { 'Content-Type': 'text/html' },
+    })
+    Object.defineProperty(response, 'url', { value: String(url) })
+    return response
+  })
+  await expect(parseVideo(source)).rejects.toMatchObject({ code: 'VIDEO_RESOURCE_NOT_FOUND' })
+
+  vi.stubGlobal('fetch', async (url) => {
+    if (String(url).includes('/aweme/v1/web/') || String(url).includes('/aweme/v1/feed/'))
+      return new Response('', { status: 503 })
+    const response = new Response(
+      '<meta property="og:title" content="Tom &amp;amp; Jerry">' +
+        '<meta property="og:image" content="javascript:alert(1)">' +
+        '<meta property="og:video" content="https://v.douyinvod.com/target.mp4?a=1&amp;amp;b=2">',
+      { headers: { 'Content-Type': 'text/html' } },
+    )
+    Object.defineProperty(response, 'url', { value: String(url) })
+    return response
+  })
+  const parsed = await parseVideo(source)
+  expect(parsed).toMatchObject({
+    title: 'Tom &amp; Jerry',
+    videoUrl: 'https://v.douyinvod.com/target.mp4?a=1&amp;b=2',
+  })
+  expect('cover' in parsed).toBe(false)
+})
+
+test('parser strategies never follow redirects outside approved HTTPS hosts even with modal_id', async () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {})
+  const visited = []
+  vi.stubGlobal('fetch', async (url, init) => {
+    visited.push({ url: String(url), redirect: init?.redirect })
+    return new Response('redirect', {
+      status: 302,
+      headers: { Location: 'http://127.0.0.1:8080/internal-metadata' },
+    })
+  })
+  await expect(parseVideo('https://www.douyin.com/redirect?modal_id=123')).rejects.toMatchObject({
+    code: 'VIDEO_RESOURCE_NOT_FOUND',
+  })
+  expect(visited.length).toBeGreaterThan(0)
+  expect(visited.every((call) => call.redirect === 'manual')).toBe(true)
+  expect(visited.some((call) => call.url.includes('127.0.0.1'))).toBe(false)
+})
+
+test('allowlisted page redirects pass explicit finalUrl to identity checks without mutating Response', async () => {
+  vi.spyOn(console, 'info').mockImplementation(() => {})
+  vi.stubGlobal('fetch', async (url) => {
+    if (String(url).includes('/aweme/v1/web/') || String(url).includes('/aweme/v1/feed/'))
+      return new Response('', { status: 503 })
+    if (String(url) === source) {
+      return new Response('', {
+        status: 302,
+        headers: { Location: 'https://www.douyin.com/video/' + otherId },
+      })
+    }
+    const response = new Response(meta, { headers: { 'Content-Type': 'text/html' } })
+    Object.defineProperty(response, 'url', { value: '', configurable: false })
+    return response
+  })
+  await expect(parseVideo(source)).rejects.toMatchObject({ code: 'VIDEO_RESOURCE_NOT_FOUND' })
+})

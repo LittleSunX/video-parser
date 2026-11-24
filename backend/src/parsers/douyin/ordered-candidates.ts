@@ -36,6 +36,9 @@ export function mergeKnownResults(
 }
 
 export function mergeMetadata(current: VideoInfo, incoming: VideoInfo): VideoInfo {
+  const author = current.author || incoming.author
+  const cover = current.cover || incoming.cover
+  const musicUrl = current.musicUrl || incoming.musicUrl
   // Supplement the music URL/title as a pair, matching the strategy selector's existing rule.
   const musicTitle =
     !current.musicUrl && incoming.musicUrl
@@ -44,13 +47,16 @@ export function mergeMetadata(current: VideoInfo, incoming: VideoInfo): VideoInf
         (!incoming.musicUrl || incoming.musicUrl === current.musicUrl
           ? incoming.musicTitle
           : undefined)
-  return {
-    ...current,
-    author: current.author || incoming.author,
-    cover: current.cover || incoming.cover,
-    musicUrl: current.musicUrl || incoming.musicUrl,
-    musicTitle,
-  }
+  const merged: VideoInfo = { ...current }
+  if (author) merged.author = author
+  else delete merged.author
+  if (cover) merged.cover = cover
+  else delete merged.cover
+  if (musicUrl) merged.musicUrl = musicUrl
+  else delete merged.musicUrl
+  if (musicTitle) merged.musicTitle = musicTitle
+  else delete merged.musicTitle
+  return merged
 }
 
 interface Candidate {

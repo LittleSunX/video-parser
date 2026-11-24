@@ -1,3 +1,4 @@
+import { isSafeHttpUrl } from '../../../../shared/video-contract'
 import { AppError } from '../../errors/app-error'
 import type { VideoInfo } from '../../types/video'
 import type { DouyinItem, ParsedMediaResult } from './types'
@@ -5,6 +6,12 @@ import { normalizeAwemeId } from './items'
 import { extractImageAssetsWithCompleteness } from './images'
 import { selectBestBitRateStream, toVideoStreamCandidate } from './streams'
 import { extractFirstUrl, normalizeUrl, normalizeText, readNumber, toPlayableUrl } from './text'
+
+function optionalHttpUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const normalized = normalizeUrl(value).trim()
+  return isSafeHttpUrl(normalized) ? normalized : undefined
+}
 
 export function mapItemToVideoInfo(
   item: DouyinItem,
@@ -25,12 +32,15 @@ export function mapItemToVideoInfo(
   ]
   const { images: imageAssets, imagesComplete } = extractImageAssetsWithCompleteness(rawImages)
   const video = item.video ?? {}
-  const musicUrl = extractFirstUrl(item.music?.play_url)
-  const cover =
+  const author = item.author?.nickname ? normalizeText(item.author.nickname) : ''
+  const musicUrl = optionalHttpUrl(extractFirstUrl(item.music?.play_url))
+  const musicTitle = item.music?.title ? normalizeText(item.music.title) : ''
+  const cover = optionalHttpUrl(
     (imageAssets[0]?.url || undefined) ??
-    extractFirstUrl(video.origin_cover) ??
-    extractFirstUrl(video.cover) ??
-    extractFirstUrl(video.dynamic_cover)
+      extractFirstUrl(video.origin_cover) ??
+      extractFirstUrl(video.cover) ??
+      extractFirstUrl(video.dynamic_cover),
+  )
 
   if (imageAssets.length > 0) {
     const result: VideoInfo = {
@@ -39,11 +49,11 @@ export function mapItemToVideoInfo(
       videoId: itemId ?? fallbackVideoId,
       sourceUrl: sourceUrl.toString(),
       title: normalizeText(item.desc || '抖音图文'),
-      author: item.author?.nickname ? normalizeText(item.author.nickname) : undefined,
-      cover: cover ? normalizeUrl(cover) : undefined,
+      ...(author ? { author } : {}),
+      ...(cover ? { cover } : {}),
       images: imageAssets,
-      musicUrl: musicUrl ? normalizeUrl(musicUrl) : undefined,
-      musicTitle: item.music?.title ? normalizeText(item.music.title) : undefined,
+      ...(musicUrl ? { musicUrl } : {}),
+      ...(musicTitle ? { musicTitle } : {}),
     }
     return { video: result, imagesComplete }
   }
@@ -56,9 +66,10 @@ export function mapItemToVideoInfo(
     [video.play_addr, video.play_addr_h264, video.download_addr]
       .map((play_addr) => toVideoStreamCandidate({ play_addr }))
       .find((candidate) => candidate !== undefined)
-  const videoUrl = selectedStream?.url
+  const rawVideoUrl = selectedStream?.url ? normalizeUrl(selectedStream.url).trim() : ''
+  const playableUrl = rawVideoUrl ? toPlayableUrl(rawVideoUrl) : ''
 
-  if (!videoUrl) {
+  if (!isSafeHttpUrl(playableUrl)) {
     throw new AppError(
       'VIDEO_RESOURCE_NOT_FOUND',
       '已获取作品信息，但没有找到视频播放地址或图文资源',
@@ -66,27 +77,18 @@ export function mapItemToVideoInfo(
     )
   }
 
-  if (bestBitRateStream) {
-    console.info(
-      '[DouyinParser] selected highest quality stream:',
-      bestBitRateStream.width + 'x' + bestBitRateStream.height,
-      'bitRate=' + bestBitRateStream.bitRate,
-      'fileSize=' + bestBitRateStream.fileSize,
-    )
-  }
-
-  const playableUrl = toPlayableUrl(normalizeUrl(videoUrl))
   // Alternatives must stay paired with this exact selected stream and its file size.
   const videoUrlAlternatives =
-    playableUrl === normalizeUrl(videoUrl) ? selectedStream?.urlAlternatives : undefined
+    playableUrl === rawVideoUrl ? selectedStream?.urlAlternatives : undefined
   // 仅使用所选码率流的大小；变换播放地址后不沿用原文件大小。
   const videoSize =
     bestBitRateStream &&
-    playableUrl === normalizeUrl(bestBitRateStream.url) &&
+    playableUrl === normalizeUrl(bestBitRateStream.url).trim() &&
     Number.isSafeInteger(bestBitRateStream.fileSize) &&
     bestBitRateStream.fileSize > 0
       ? bestBitRateStream.fileSize
       : undefined
+  const duration = readNumber(item.duration) || readNumber(video.duration)
 
   return {
     imagesComplete: true,
@@ -96,14 +98,14 @@ export function mapItemToVideoInfo(
       videoId: itemId ?? fallbackVideoId,
       sourceUrl: sourceUrl.toString(),
       title: normalizeText(item.desc || '抖音视频'),
-      author: item.author?.nickname ? normalizeText(item.author.nickname) : undefined,
-      cover: cover ? normalizeUrl(cover) : undefined,
-      duration: readNumber(item.duration) || readNumber(video.duration) || undefined,
+      ...(author ? { author } : {}),
+      ...(cover ? { cover } : {}),
+      ...(duration ? { duration } : {}),
       videoUrl: playableUrl,
       ...(videoUrlAlternatives?.length ? { videoUrlAlternatives } : {}),
       ...(videoSize === undefined ? {} : { videoSize }),
-      musicUrl: musicUrl ? normalizeUrl(musicUrl) : undefined,
-      musicTitle: item.music?.title ? normalizeText(item.music.title) : undefined,
+      ...(musicUrl ? { musicUrl } : {}),
+      ...(musicTitle ? { musicTitle } : {}),
     },
   }
 }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { isSafeHttpUrl } from '../../shared/video-contract'
 import type { VideoInfo } from './types/video'
 import { formatDuration } from './utils/duration'
 import { imageSaveSummary, presentTitle } from './utils/presentation'
@@ -83,6 +84,10 @@ const primarySaveElement = ref<HTMLElement>()
 const transferElement = ref<HTMLElement>()
 const coverFailed = ref(false)
 const title = computed(() => presentTitle(video.value?.title ?? ''))
+const safeSourceUrl = computed(() => {
+  const url = video.value?.sourceUrl
+  return url && isSafeHttpUrl(url) ? url : undefined
+})
 
 const imageSaveDisabled = computed(
   () => loading.value || bufferBusy.value || batchDownloading.value || pendingBatch.value,
@@ -658,8 +663,9 @@ function platformName(platform: VideoInfo['platform']) {
           ><AppIcon name="download" />
         </button>
         <a
+          v-if="safeSourceUrl"
           class="original-link text-button"
-          :href="video.sourceUrl"
+          :href="safeSourceUrl"
           target="_blank"
           rel="noopener noreferrer"
           >查看原作品<AppIcon name="arrow"

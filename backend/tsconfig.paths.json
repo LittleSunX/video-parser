@@ -1,0 +1,11 @@
+{
+  // Windows 受限沙箱或禁用符号链接解析时，node_modules/@video-parser/backend 目录联接无法通过
+  // 原生 realpath 定位工作区根目录下的 ../shared/*；集中在此维护与 backend/package.json#exports
+  // 一致的源码入口映射，供 server 与 worker 的 tsconfig 统一继承。
+  "compilerOptions": {
+    "paths": {
+      "@video-parser/backend/http": ["./src/http/handle-request.ts"],
+      "@video-parser/backend/runtime": ["./src/http/runtime.ts"]
+    }
+  }
+}

@@ -51,7 +51,12 @@ export default ts.config(
     },
   },
   {
-    files: ['frontend/src/utils/download.ts', 'backend/src/http/handle-request.ts'],
+    files: [
+      'shared/filename.ts',
+      'frontend/src/utils/download.ts',
+      'frontend/src/utils/media-archive.ts',
+      'backend/src/http/handle-request.ts',
+    ],
     // 文件名清理必须匹配不可打印控制字符。
     rules: { 'no-control-regex': 'off' },
   },

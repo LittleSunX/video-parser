@@ -1,6 +1,5 @@
 import type { ApiVersion } from '@video-parser/backend/runtime'
-import { createDiagnostics, withDiagnostics } from '../../backend/src/utils/diagnostics'
-import { downloadErrorPage } from '../../backend/src/utils/download-error-page'
+import { createDiagnostics, downloadErrorPage, withDiagnostics } from '@video-parser/backend/http'
 
 /** Adapter errors use the same diagnostics and native-download protocol as the core. */
 export async function publicError(

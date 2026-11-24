@@ -6,6 +6,7 @@ import {
   buildLivePhotoFilename,
   buildMusicFilename,
   buildVideoFilename,
+  openDirectDownload,
 } from '../frontend/src/utils/download'
 import worker from '../worker/src/index'
 
@@ -76,4 +77,43 @@ test.each([
   expect(decodeURIComponent(disposition.split("filename*=UTF-8''")[1])).toBe(expected)
   expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([...bytes])
   expect(fetch).toHaveBeenCalledOnce()
+})
+
+test('sanitizes videoId path characters and preserves item suffixes at maximum metadata lengths', () => {
+  const maxItem = {
+    ...video,
+    videoId: '../dir\\id:' + '9'.repeat(55),
+    author: '作'.repeat(48),
+    title: '标'.repeat(48),
+  }
+  const first = buildImageFilename(maxItem, 0)
+  const second = buildImageFilename(maxItem, 1)
+  const live = buildLivePhotoFilename(maxItem, 0)
+  expect(first).not.toBe(second)
+  expect(first).toMatch(/_01\.jpg$/)
+  expect(second).toMatch(/_02\.jpg$/)
+  expect(live).toMatch(/_实况_01\.mp4$/)
+  for (const name of [first, second, live]) {
+    expect(name).not.toMatch(/[\\/:"*?<>|]/)
+    expect(name.startsWith('..')).toBe(false)
+    expect(name.replace(/\.[^.]+$/, '').length).toBeLessThanOrEqual(150)
+  }
+})
+
+test('openDirectDownload refuses non-HTTP(S) and credentialed URLs', () => {
+  const clicks = []
+  vi.stubGlobal('document', {
+    body: { appendChild: vi.fn() },
+    createElement: () => ({
+      click() {
+        clicks.push(this.href)
+      },
+      remove: vi.fn(),
+    }),
+  })
+  openDirectDownload('javascript:alert(1)')
+  openDirectDownload('data:text/html,<script>alert(1)</script>')
+  openDirectDownload('https://user:pass@v.douyinvod.com/video.mp4')
+  openDirectDownload('https://v.douyinvod.com/video.mp4')
+  expect(clicks).toEqual(['https://v.douyinvod.com/video.mp4'])
 })

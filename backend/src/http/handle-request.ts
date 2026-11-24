@@ -14,6 +14,9 @@ import { acceptsParseStream, parseStreamResponse } from '../services/parse-strea
 import { extractUrl, validateSupportedUrl } from '../utils/url'
 import type { ApiRequestContext, ApiRuntime } from './runtime'
 
+export { createDiagnostics, withDiagnostics } from '../utils/diagnostics'
+export { downloadErrorPage } from '../utils/download-error-page'
+
 export async function handleRequest(
   request: Request,
   runtime: ApiRuntime,
