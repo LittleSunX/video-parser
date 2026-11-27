@@ -92,5 +92,9 @@ export function compareVideoStreamCandidates(
     return right.bitRate - left.bitRate
   }
 
-  return right.fileSize - left.fileSize
+  if (right.fileSize !== left.fileSize) {
+    return right.fileSize - left.fileSize
+  }
+
+  return Number(/^https:/i.test(right.url)) - Number(/^https:/i.test(left.url))
 }

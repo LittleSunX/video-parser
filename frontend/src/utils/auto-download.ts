@@ -13,6 +13,8 @@ interface DownloadOptions {
   alternativeUrls?: string[]
   /** 完整接收后记住所用地址，供打开直链和复制地址复用。 */
   onSourceReady?: (url: string) => void
+  /** 媒体超出缓冲上限时，提供可交给原生下载的同一地址。 */
+  onSourceTooLarge?: (url: string) => void
   totalTimeoutMs?: number
   responseTimeoutMs?: number
   readTimeoutMs?: number
@@ -49,6 +51,8 @@ export async function fetchMediaBlob(
       blob = await fetchSingleMediaBlob(candidate, options, kind, maxBytes)
     } catch (error) {
       options.signal.throwIfAborted()
+      if (error instanceof MediaDownloadError && error.code === 'TOO_LARGE')
+        options.onSourceTooLarge?.(candidate)
       if (!canRetryDirectSource(error)) throw error
       lastError = error
       continue

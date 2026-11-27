@@ -86,7 +86,7 @@ test.each([
   await expect(fetchMediaBlob(primary, options())).rejects.toHaveProperty('code', 'INVALID_MEDIA')
 })
 
-test.each([new Uint8Array([1, 2]), new Uint8Array([1, 2, 3, 4, 5])])(
+test.each([new Uint8Array(), new Uint8Array([1, 2]), new Uint8Array([1, 2, 3, 4, 5])])(
   'a full range must actually deliver the stated number of bytes: %j',
   async (body) => {
     vi.stubGlobal(
@@ -166,7 +166,16 @@ test.each([new Uint8Array([1, 2]), new Uint8Array([1, 2, 3, 4, 5])])(
       'fetch',
       vi.fn(async () => partial({}, body)),
     )
-    const response = await fetchMedia(new URL(primary), null, new AbortController().signal)
-    await expect(response.arrayBuffer()).rejects.toHaveProperty('code', 'DOWNLOAD_NETWORK_ERROR')
+    const trace = { emit: vi.fn() }
+    const response = await fetchMedia(new URL(primary), null, new AbortController().signal, trace)
+    await expect(response.arrayBuffer()).rejects.toHaveProperty('code', 'DOWNLOAD_FAILED')
+    expect(trace.emit).toHaveBeenCalledWith(
+      'download_transfer',
+      expect.objectContaining({
+        outcome: 'error',
+        bytes: body.byteLength,
+        code: 'DOWNLOAD_FAILED',
+      }),
+    )
   },
 )

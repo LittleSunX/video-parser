@@ -339,6 +339,82 @@ test('overlapping monitoring passes cannot both change the alert state', async (
   await first
 })
 
+test('a 60-second window includes the current health probe after the prior sample aged out', async () => {
+  const time = vi.spyOn(Date, 'now').mockReturnValue(now)
+  const events = [
+    record(1, 'request_response', {
+      operation: 'other',
+      status: 200,
+      timestamp: new Date(now - 62000).toISOString(),
+    }),
+  ]
+  const result = await runMonitor({
+    config: { windowSeconds: 60, consecutiveFailures: 1 },
+    stateDirectory: await temporary(),
+    async healthProbe() {
+      time.mockReturnValue(now + 2)
+      events.push(
+        record(2, 'request_response', {
+          operation: 'other',
+          status: 200,
+          timestamp: new Date(Date.now()).toISOString(),
+        }),
+      )
+      return healthy
+    },
+    journal: (config, now) =>
+      observeLogs(Readable.from(events.map((event) => event + '\n')), {
+        now,
+        windowSeconds: config.windowSeconds,
+      }),
+  })
+  expect(result.report.logs).toMatchObject({ ok: true, accepted: 1, ignored: 1 })
+  expect(result.alerts).toEqual([])
+})
+
+test.each([false, true])(
+  'the monitor rechecks a delayed journal entry with a fresh cutoff (older build present: %s)',
+  async (olderBuildPresent) => {
+    const time = vi.spyOn(Date, 'now').mockReturnValue(now)
+    const entry = (n, version, microseconds) =>
+      JSON.stringify({
+        __REALTIME_TIMESTAMP: String(microseconds),
+        MESSAGE: record(n, 'request_response', { version, operation: 'other', status: 200 }),
+      }) + '\n'
+    const records = [entry(1, healthy.version, now * 1000 + 500)]
+    if (olderBuildPresent) records.push(entry(2, 'old-build', (now - 1000) * 1000))
+    const journal = vi.fn(async (config, sampledAt) => {
+      time.mockReturnValue(now + 250)
+      return observeLogs(Readable.from(records), {
+        now: sampledAt,
+        windowSeconds: config.windowSeconds,
+      })
+    })
+    const result = await runMonitor({
+      config: { windowSeconds: 60, consecutiveFailures: 1 },
+      stateDirectory: await temporary(),
+      healthProbe: async () => healthy,
+      journal,
+    })
+    expect(journal.mock.calls.map(([, sampledAt]) => sampledAt)).toEqual([now, now + 250])
+    expect(result.report.timestamp).toBe(new Date(now + 250).toISOString())
+    expect(result.report.logs.versions).toHaveProperty(healthy.version)
+    expect(result.alerts).toEqual([])
+  },
+)
+
+test('a genuinely empty journal still raises an alert after a single retry', async () => {
+  const journal = vi.fn(async () => ({ ok: false, reason: 'no_usable_records', versions: {} }))
+  const result = await runMonitor({
+    config: { consecutiveFailures: 1 },
+    stateDirectory: await temporary(),
+    healthProbe: async () => healthy,
+    journal,
+  })
+  expect(journal).toHaveBeenCalledTimes(2)
+  expect(result.alerts).toMatchObject([{ rule: 'diagnostics_unavailable', transition: 'firing' }])
+})
+
 test('monitor CLI errors do not disclose a private config path or its contents', () => {
   const result = spawnSync(
     process.execPath,
@@ -356,7 +432,7 @@ test('monitor CLI errors do not disclose a private config path or its contents',
   expect(result.stderr + result.stdout).not.toContain('PRIVATE')
 })
 
-test.each(['complete', 'short', 'cancel'])(
+test.each(['complete', 'short', 'empty', 'cancel'])(
   'proxy diagnostics record exactly one %s terminal and no media URL',
   async (mode) => {
     const emit = vi.fn()
@@ -367,15 +443,20 @@ test.each(['complete', 'short', 'cancel'])(
               c.enqueue(new Uint8Array([1]))
             },
           })
-        : new Uint8Array(mode === 'short' ? [1] : [1, 2])
+        : new Uint8Array(mode === 'empty' ? [] : mode === 'short' ? [1] : [1, 2])
     vi.stubGlobal(
       'fetch',
       vi.fn(
         async () =>
-          new Response(body, {
-            status: 206,
-            headers: { 'Content-Type': 'video/mp4', 'Content-Range': 'bytes 0-1/2' },
-          }),
+          new Response(
+            body,
+            mode === 'empty'
+              ? { headers: { 'Content-Type': 'video/mp4' } }
+              : {
+                  status: 206,
+                  headers: { 'Content-Type': 'video/mp4', 'Content-Range': 'bytes 0-1/2' },
+                },
+          ),
       ),
     )
     const response = await fetchMedia(
@@ -384,15 +465,21 @@ test.each(['complete', 'short', 'cancel'])(
       new AbortController().signal,
       { emit },
     )
-    if (mode === 'short')
-      await expect(response.arrayBuffer()).rejects.toHaveProperty('code', 'DOWNLOAD_NETWORK_ERROR')
+    if (mode === 'short' || mode === 'empty')
+      await expect(response.arrayBuffer()).rejects.toHaveProperty('code', 'DOWNLOAD_FAILED')
     else if (mode === 'cancel') await response.body.cancel()
     else expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([1, 2]))
     expect(emit).toHaveBeenCalledOnce()
     expect(emit).toHaveBeenCalledWith(
       'download_transfer',
       expect.objectContaining({
-        outcome: mode === 'short' ? 'error' : mode === 'cancel' ? 'cancelled' : 'success',
+        outcome:
+          mode === 'short' || mode === 'empty'
+            ? 'error'
+            : mode === 'cancel'
+              ? 'cancelled'
+              : 'success',
+        ...(mode === 'short' || mode === 'empty' ? { code: 'DOWNLOAD_FAILED' } : {}),
         rangeRequest: false,
       }),
     )

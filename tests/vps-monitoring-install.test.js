@@ -30,7 +30,7 @@ async function fixture({ badSample = false, failInstall = false, legacy = false 
       directory: false,
     })
   entries.set('server/monitor.mjs', { body: Buffer.from('new monitor'), directory: false })
-  await fs.mkdir(join(root, 'monitor'), { recursive: true })
+  await fs.mkdir(legacy ? join(root, 'monitor') : root, { recursive: true })
   await fs.mkdir(join(etc, 'systemd/system'), { recursive: true })
   if (legacy) {
     for (const name of [timer, monitor]) {
@@ -173,6 +173,45 @@ test('installation preserves the private API directory and creates a root-only m
     expect((await fs.stat(join(folder, 'monitor.json'))).mode & 0o777).toBe(0o600)
   }
 })
+
+test.skipIf(process.platform === 'win32')(
+  'a restrictive installer umask cannot lock the dynamic user out of the program directory',
+  async () => {
+    const f = await fixture()
+    const operation = await prepareMonitoring(f.entries, f.options)
+    const previous = process.umask(0o077)
+    try {
+      await operation.install()
+    } finally {
+      process.umask(previous)
+    }
+    expect((await fs.stat(join(f.root, 'monitor'))).mode & 0o777).toBe(0o755)
+    expect((await fs.stat(join(f.etc, 'video-parser'))).mode & 0o777).toBe(0o700)
+    expect((await fs.stat(join(f.etc, 'video-parser/monitor.json'))).mode & 0o777).toBe(0o600)
+  },
+)
+
+test.skipIf(process.platform === 'win32')(
+  'a failed upgrade restores a pre-existing private program directory mode',
+  async () => {
+    const f = await fixture({ legacy: true, badSample: true })
+    const program = join(f.root, 'monitor')
+    const privateConfig = join(f.etc, 'video-parser')
+    await fs.chmod(program, 0o700)
+    await fs.mkdir(privateConfig)
+    await fs.chmod(privateConfig, 0o750)
+    const operation = await prepareMonitoring(f.entries, f.options)
+    expect((await fs.stat(program)).mode & 0o777).toBe(0o700)
+    await operation.install()
+    expect((await fs.stat(program)).mode & 0o777).toBe(0o711)
+    expect((await fs.stat(privateConfig)).mode & 0o777).toBe(0o750)
+    await expect(operation.verify(version)).rejects.toThrow('sample')
+    await operation.rollback()
+    expect((await fs.stat(program)).mode & 0o777).toBe(0o700)
+    expect((await fs.stat(privateConfig)).mode & 0o777).toBe(0o750)
+    expect(await fs.readFile(join(program, 'monitor.mjs'), 'utf8')).toBe('old monitor')
+  },
+)
 
 test.each([false, true])(
   'failed sample restores the previous monitoring installation (legacy=%s)',

@@ -1,3 +1,4 @@
+import { parseRequestBody } from '../../../shared/parse-request.mjs'
 import type { VideoInfo } from '../types/video'
 import { readVideoResponse } from './response'
 import { readParseStream } from './parse-stream'
@@ -17,33 +18,29 @@ export async function parseVideo(
   let streaming: boolean | undefined
   let stage: ParseStage = 'request'
   try {
-    const form = new URLSearchParams({ url: input })
     // 分享文案通常很短；编码膨胀超过后端字节上限时保留 JSON 提交能力。
-    const useJson = form.toString().length > 32 * 1024
+    const { body, headers } = parseRequestBody(input)
     const accept: Record<string, string> = onPreview ? { Accept: 'application/x-ndjson' } : {}
     response = await fetch(apiBaseUrl + '/api/parse', {
       method: 'POST',
       signal,
       credentials: 'omit',
-      ...(useJson
-        ? {
-            headers: { ...accept, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: input }),
-          }
-        : { headers: accept, body: form }),
+      headers: { ...accept, ...headers },
+      body,
     })
     // 前后端独立部署时兼容旧 Worker；只在格式不支持时回退一次。
-    if (!useJson && response.status === 415) {
+    if (typeof body !== 'string' && response.status === 415) {
       signal?.throwIfAborted()
       // 清理不能阻塞兼容请求，最终报告只关联真正使用的响应。
       void response.body?.cancel().catch(() => {})
       response = undefined
+      const json = parseRequestBody(input, true)
       response = await fetch(apiBaseUrl + '/api/parse', {
         method: 'POST',
         signal,
         credentials: 'omit',
-        headers: { ...accept, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: input }),
+        headers: { ...accept, ...json.headers },
+        body: json.body,
       })
     }
     responseMs = Math.round(performance.now() - started)

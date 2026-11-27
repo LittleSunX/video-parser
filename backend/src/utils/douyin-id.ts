@@ -11,10 +11,9 @@ export function extractDouyinVideoId(url: URL): string | undefined {
     if (match?.[1]) return match[1]
   }
 
-  return (
-    url.searchParams.get('modal_id') ??
-    url.searchParams.get('aweme_id') ??
-    url.searchParams.get('video_id') ??
-    undefined
-  )
+  for (const name of ['modal_id', 'aweme_id', 'video_id']) {
+    const id = url.searchParams.getAll(name).find((value) => /^\d+$/.test(value))
+    if (id) return id
+  }
+  return undefined
 }

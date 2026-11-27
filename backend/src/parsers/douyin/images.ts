@@ -213,6 +213,10 @@ export function hasAllImageResources(images: ImageAsset[]): boolean {
   )
 }
 
+function isLiveVideoAddress(url: string): boolean {
+  return !/\.mp3$/i.test(new URL(url).pathname)
+}
+
 export function extractLivePhotoUrl(image: Record<string, unknown>): string | undefined {
   let video: Record<string, unknown> | undefined
 
@@ -229,32 +233,15 @@ export function extractLivePhotoUrl(image: Record<string, unknown>): string | un
   for (const key of ['play_addr', 'play_addr_h264', 'play_addr_lowbr', 'download_addr']) {
     const address = video[key]
     const uri = extractUri(address)
-
-    if (uri) {
-      if (/^https?:/i.test(uri)) {
-        const candidate = [extractFirstUrl([uri, address]), extractFirstUrl(uri)].find(
-          (url) => !!url && !/\.mp3(?:$|\?)/i.test(url),
-        )
-        if (candidate) return candidate
-      } else if (!/mp3/i.test(uri)) {
-        return buildLivePhotoPlayUrl(uri)
-      }
-    }
-
-    const directUrl = extractFirstUrl(address)
-    if (directUrl && !/\.mp3(?:$|\?)/i.test(directUrl)) return directUrl
+    const uriIsUrl = !!uri && /^https?:/i.test(uri)
+    if (uri && !uriIsUrl && !/mp3/i.test(uri)) return buildLivePhotoPlayUrl(uri)
+    const directUrl = extractFirstUrl(uriIsUrl ? [uri, address] : address, isLiveVideoAddress)
+    if (directUrl) return directUrl
   }
 
   const vid = typeof video.vid === 'string' ? video.vid.trim() : ''
-  if (vid && !/mp3/i.test(vid)) {
-    if (/^https?:/i.test(vid)) {
-      const candidate = extractFirstUrl(vid)
-      return candidate && !/\.mp3(?:$|\?)/i.test(candidate) ? candidate : undefined
-    }
-    return buildLivePhotoPlayUrl(vid)
-  }
-
-  return undefined
+  if (/^https?:/i.test(vid)) return extractFirstUrl(vid, isLiveVideoAddress)
+  return vid && !/mp3/i.test(vid) ? buildLivePhotoPlayUrl(vid) : undefined
 }
 
 export function extractUri(input: unknown): string | undefined {

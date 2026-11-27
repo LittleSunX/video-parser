@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test, vi } from 'vitest'
 import { releasePlan } from '../scripts/release-worker.mjs'
 import { checkRelease, compareVersions } from '../scripts/check-release.mjs'
+import { readParseInput } from '../backend/src/utils/parse-input'
 import {
   inspectParsed,
   probeMedia,
@@ -306,6 +307,29 @@ test('限流后停止解析后续样本，不自动重试', async () => {
   assert.equal(JSON.stringify(result).includes('不应输出'), false)
 })
 
+test('样本使用 JSON 提交超出表单字节上限的分享文案', async () => {
+  const first = manifest.samples[0]
+  const input = '中'.repeat(4999 - first.input.length) + ' ' + first.input
+  const samples = [{ ...first, input }, ...manifest.samples.slice(1)]
+  const fetchFn = vi.fn(async (url, config) => {
+    if (url.endsWith('/api/health')) return Response.json(health)
+    const request = new Request(url, config)
+    assert.equal(request.headers.get('Content-Type'), 'application/json')
+    assert.equal(await readParseInput(request), input)
+    return Response.json(
+      { success: false, error: { code: 'RATE_LIMITED' } },
+      { status: 429, headers: { 'X-Worker-Version': health.data.version } },
+    )
+  })
+  const result = await runAcceptance({ worker: 'https://worker', manifest: { samples } }, fetchFn)
+  assert.equal(result.samples[0].status, 429)
+  assert.equal(fetchFn.mock.calls.length, 2)
+  assert.throws(
+    () => validateSamples({ samples: [{ ...first, input: '中' + input }, ...samples.slice(1)] }),
+    /5000/,
+  )
+})
+
 test('下载限流也会停止后续样本，并且取消错误响应流', async () => {
   let cancelled = false
   const fetchFn = vi.fn(async (url) => {
@@ -359,6 +383,13 @@ test('来源作品必须匹配，资源地址不能用非 HTTPS 地址凑计数'
     videoUrl: 'https://cdn/video.mp4',
   }
   assert.equal(inspectParsed(sample, data).failures.length, 0)
+  assert.deepEqual(
+    inspectParsed(sample, {
+      ...data,
+      sourceUrl: 'https://www.douyin.com/?modal_id=&modal_id=invalid&aweme_id=' + data.videoId,
+    }).failures,
+    [],
+  )
   assert.notEqual(
     inspectParsed(sample, {
       ...data,

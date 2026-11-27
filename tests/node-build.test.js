@@ -4,6 +4,7 @@ import { once } from 'node:events'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { builtinModules } from 'node:module'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -13,7 +14,7 @@ let output
 const children = new Set()
 beforeAll(async () => {
   const { buildServer } = await import('../server/build.mjs')
-  dir = await mkdtemp(join(process.env.TMPDIR ?? join(root, 'server'), 'node-build-'))
+  dir = await mkdtemp(join(tmpdir(), 'video-parser-node-build-'))
   output = await buildServer({ outdir: dir })
 }, 30_000)
 afterAll(async () => {

@@ -1408,6 +1408,48 @@ test('failed batch partial files have a short task lifetime', async () => {
   assert.match(app.batchProgress.value, /暂存已到期/)
 })
 
+test.each([false, true])(
+  'expiring cached files preserves an unrecoverable ZIP failure (previous part saved=%s)',
+  async (savedPart) => {
+    vi.useFakeTimers()
+    mockBrowserSave()
+    const createSession = batchArchive.createBatchSession
+    vi.spyOn(batchArchive, 'createBatchSession').mockImplementation((jobs) =>
+      createSession(jobs, 6),
+    )
+    const urls = ['https://image/first-part', 'https://image/cached', 'https://image/expired']
+    const { app } = createApp()
+    app.video.value = { images: urls.slice(savedPart ? 0 : 1).map((url) => ({ url })) }
+    global.fetch = vi.fn(async (url) => {
+      if (url.includes('expired')) return new Response(null, { status: 403 })
+      return new Response(new Uint8Array(url === urls[0] ? 6 : 2), {
+        headers: { 'Content-Type': 'image/jpeg' },
+      })
+    })
+    await app.handleDownloadAllOriginals()
+    if (savedPart) {
+      app.saveBatchPart()
+      await app.continueBatchDownload()
+    }
+    const failure = app.batchProgress.value
+    const failedItem = { ...app.batchItems.value.at(-1) }
+    assert.match(failure, /重新解析/)
+    assert.equal(failedItem.state, 'failed')
+    assert.equal(app.batchHasCache.value, true)
+    await vi.advanceTimersByTimeAsync(PREPARED_DOWNLOAD_TTL_MS)
+    assert.equal(app.batchHasCache.value, false)
+    assert.equal(app.batchFailed.value, true)
+    assert.equal(app.batchCanRetry.value, false)
+    assert.equal(app.batchCanContinue.value, false)
+    assert.equal(app.batchProgress.value, failure)
+    assert.deepEqual(app.batchItems.value.at(-1), failedItem)
+    assert.equal(app.batchItems.value.at(-2).state, 'pending')
+    if (savedPart) assert.equal(app.batchItems.value[0].state, 'packed')
+    app.stopBatchDownload()
+    assert.equal(app.batchFailed.value, false)
+  },
+)
+
 test.each([VIDEO_BUFFER_BYTES + 1, 200 * 1024 * 1024])(
   'known large video (%s bytes) skips buffered GET and hands off once',
   async (videoSize) => {

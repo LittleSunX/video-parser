@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import process from 'node:process'
-import { URL, URLSearchParams } from 'node:url'
+import { URL } from 'node:url'
+import { MAX_PARSE_INPUT_LENGTH, parseRequestBody } from '../shared/parse-request.mjs'
 import {
   cli,
   endpoint,
@@ -56,9 +57,9 @@ function sourceAddress(value, videoId) {
   if (!videoId) return true
   const id =
     /\/(?:share\/)?(?:video|note|slides|aweme\/detail)\/(\d+)/.exec(url.pathname)?.[1] ??
-    url.searchParams.get('modal_id') ??
-    url.searchParams.get('aweme_id') ??
-    url.searchParams.get('video_id')
+    ['modal_id', 'aweme_id', 'video_id']
+      .flatMap((key) => url.searchParams.getAll(key))
+      .find((value) => /^\d+$/.test(value))
   return id === videoId
 }
 
@@ -69,8 +70,14 @@ export function validateSamples(manifest) {
   for (const sample of samples) {
     if (!Object.hasOwn(labels, sample?.kind ?? ''))
       throw new Error('样本类别必须是 video、image 或 live-photo')
-    if (typeof sample.input !== 'string' || !sample.input.trim() || sample.input.length > 8192)
-      throw new Error('请为每个样本填写真实分享链接或文案，长度不超过 8192 字符')
+    if (
+      typeof sample.input !== 'string' ||
+      !sample.input.trim() ||
+      sample.input.length > MAX_PARSE_INPUT_LENGTH
+    )
+      throw new Error(
+        `请为每个样本填写真实分享链接或文案，长度不超过 ${MAX_PARSE_INPUT_LENGTH} 字符`,
+      )
     const inputUrl = sample.input
       .match(/https?:\/\/[^\s<>"']+/i)?.[0]
       .replace(/[，。；！？、）】》」』),.;!?]+$/g, '')
@@ -330,18 +337,18 @@ export async function runAcceptance(
         batchSignal,
         globalThis.AbortSignal.timeout(timeout),
       ])
+      const payload = parseRequestBody(sample.input)
       let response = await fetchFn(parseUrl, {
         method: 'POST',
-        body: new URLSearchParams({ url: sample.input }),
+        ...payload,
         signal,
         redirect: 'error',
       })
-      if (response.status === 415) {
+      if (typeof payload.body !== 'string' && response.status === 415) {
         void response.body?.cancel().catch(() => {})
         response = await fetchFn(parseUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: sample.input }),
+          ...parseRequestBody(sample.input, true),
           signal,
           redirect: 'error',
         })
