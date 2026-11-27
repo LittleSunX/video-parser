@@ -11,6 +11,13 @@ export function presentTitle(title: string) {
   return { text: text || (tags.length ? '分享的作品' : '未命名作品'), tags }
 }
 
+export function formatFileSize(bytes?: number): string {
+  if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return ''
+  if (bytes < 1024 * 1024) return Math.max(1, Math.round(bytes / 1024)) + ' KB'
+  const megabytes = bytes / 1024 / 1024
+  return (megabytes >= 100 ? Math.round(megabytes).toString() : megabytes.toFixed(1)) + ' MB'
+}
+
 export function imageSaveSummary(video: VideoInfo | null, preferLive: boolean) {
   const targets = imageDownloadTargets(video, preferLive)
   const live = targets.filter((target) => target.live).length

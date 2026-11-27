@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ImageAsset } from '../types/video'
 import AppIcon from './AppIcon.vue'
 
@@ -17,16 +17,38 @@ const emit = defineEmits<{
 const view = ref<'single' | 'grid'>('single')
 const selected = computed(() => props.images[props.selectedIndex])
 const dialog = ref<HTMLDialogElement>()
+const mainImage = ref<HTMLImageElement>()
+const thumbnailsElement = ref<HTMLElement>()
 const zoomed = ref(false)
 const imageFailed = ref(false)
+const imageLoading = ref(false)
 let previousOverflow = ''
 let returnFocus: HTMLElement | null = null
 let touchStart: { x: number; y: number } | undefined
 
 watch(
-  () => [props.selectedIndex, selected.value?.url],
-  () => {
+  () => [props.selectedIndex, selected.value?.url] as const,
+  async ([, nextUrl], previous) => {
     imageFailed.value = false
+    if (!nextUrl || nextUrl === previous?.[1]) {
+      imageLoading.value = false
+      return
+    }
+    imageLoading.value = true
+    await nextTick()
+    if (mainImage.value?.complete && mainImage.value.naturalWidth > 0) {
+      imageLoading.value = false
+    }
+  },
+)
+watch(
+  () => props.selectedIndex,
+  async (index) => {
+    await nextTick()
+    const active = thumbnailsElement.value?.children[index]
+    if (active instanceof HTMLElement) {
+      active.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    }
   },
 )
 watch(
@@ -44,7 +66,20 @@ function selectTile(index: number) {
   select(index)
   view.value = 'single'
 }
-function onKeydown(event: KeyboardEvent) {
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+}
+function onWindowKeydown(event: KeyboardEvent) {
+  if (
+    props.images.length <= 1 ||
+    event.defaultPrevented ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.altKey ||
+    isEditableTarget(event.target)
+  )
+    return
   if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
     event.preventDefault()
     select(props.selectedIndex + (event.key === 'ArrowLeft' ? -1 : 1))
@@ -66,6 +101,12 @@ function closeZoom() {
   document.body.style.overflow = previousOverflow
   returnFocus?.focus()
 }
+function saveFromZoom(live: boolean) {
+  const index = props.selectedIndex
+  closeZoom()
+  if (live) emit('saveLive', index)
+  else emit('save', index)
+}
 function startSwipe(event: TouchEvent) {
   const touch = event.changedTouches[0]
   if (touch) touchStart = { x: touch.clientX, y: touch.clientY }
@@ -80,11 +121,15 @@ function endSwipe(event: TouchEvent) {
   }
   touchStart = undefined
 }
-onBeforeUnmount(closeZoom)
+onMounted(() => window.addEventListener('keydown', onWindowKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onWindowKeydown)
+  closeZoom()
+})
 </script>
 
 <template>
-  <section class="image-gallery" aria-label="图文浏览" @keydown="onKeydown">
+  <section class="image-gallery" aria-label="图文浏览">
     <div class="gallery-toolbar">
       <span class="gallery-counter" aria-live="polite"
         >{{ String(selectedIndex + 1).padStart(2, '0') }}
@@ -109,11 +154,14 @@ onBeforeUnmount(closeZoom)
           @click="openZoom"
         >
           <img
+            ref="mainImage"
             :src="selected.url"
             :alt="title + ' · 第 ' + (selectedIndex + 1) + ' 张'"
+            :class="{ 'is-loading': imageLoading }"
             decoding="async"
             fetchpriority="high"
-            @error="imageFailed = true"
+            @load="imageLoading = false"
+            @error="((imageFailed = true), (imageLoading = false))"
           />
         </button>
         <div v-else class="media-placeholder">
@@ -121,6 +169,9 @@ onBeforeUnmount(closeZoom)
             imageFailed ? '图片暂时无法预览，可尝试下载原图' : '仅动态资源，暂无静态预览'
           }}</span>
         </div>
+        <span v-if="imageLoading" class="image-loading-indicator" aria-hidden="true"
+          ><span class="button-spinner"
+        /></span>
         <span class="media-badge">{{
           selected.livePhotoUrl ? '含实况 · 静态预览' : '静态图片'
         }}</span>
@@ -187,7 +238,12 @@ onBeforeUnmount(closeZoom)
           </button>
         </div>
       </div>
-      <div v-if="images.length > 1" class="thumbnails" aria-label="选择图片">
+      <div
+        v-if="images.length > 1"
+        ref="thumbnailsElement"
+        class="thumbnails"
+        aria-label="选择图片"
+      >
         <button
           v-for="(asset, index) in images"
           :key="index"
@@ -238,7 +294,6 @@ onBeforeUnmount(closeZoom)
         @close="closeZoom"
         @cancel.prevent="closeZoom"
         @click.self="closeZoom"
-        @keydown="onKeydown"
       >
         <template v-if="zoomed && selected">
           <div class="dialog-header">
@@ -286,7 +341,36 @@ onBeforeUnmount(closeZoom)
               <AppIcon name="right" />
             </button>
           </div>
-          <p class="dialog-hint">左右切换图片 · Esc 关闭</p>
+          <div class="dialog-footer">
+            <p class="dialog-hint">左右滑动或方向键切换 · Esc 关闭</p>
+            <div v-if="selected.url || selected.livePhotoUrl" class="dialog-actions">
+              <button
+                v-if="selected.url"
+                type="button"
+                class="secondary-button"
+                :aria-label="
+                  '保存第 ' +
+                  (selectedIndex + 1) +
+                  ' 张' +
+                  (selected.watermarkFree ? '无水印原图' : '高清原图')
+                "
+                :disabled="downloadDisabled"
+                @click="saveFromZoom(false)"
+              >
+                <AppIcon name="download" />{{ selected.watermarkFree ? '无水印原图' : '高清原图' }}
+              </button>
+              <button
+                v-if="selected.livePhotoUrl"
+                type="button"
+                class="secondary-button"
+                :aria-label="'保存第 ' + (selectedIndex + 1) + ' 项动态 MP4'"
+                :disabled="downloadDisabled"
+                @click="saveFromZoom(true)"
+              >
+                <AppIcon name="film" />动态 MP4
+              </button>
+            </div>
+          </div>
         </template>
       </dialog>
     </Teleport>

@@ -29,6 +29,19 @@ export function buildMusicFilename(video: VideoInfo): string {
   return buildFilename(video, 'mp3', '背景音乐')
 }
 
+export function canReadClipboard(): boolean {
+  return (
+    typeof navigator !== 'undefined' &&
+    typeof navigator.clipboard?.readText === 'function' &&
+    (typeof window === 'undefined' || window.isSecureContext)
+  )
+}
+
+export async function readClipboardText(): Promise<string> {
+  if (!canReadClipboard()) throw new Error('当前浏览器不支持读取剪贴板，请手动粘贴')
+  return navigator.clipboard.readText()
+}
+
 export async function copyText(text: string): Promise<void> {
   if (navigator.clipboard && window.isSecureContext) {
     await navigator.clipboard.writeText(text)

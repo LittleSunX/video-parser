@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { isSafeHttpUrl } from '../../shared/video-contract'
 import type { VideoInfo } from './types/video'
 import { formatDuration } from './utils/duration'
-import { imageSaveSummary, presentTitle } from './utils/presentation'
+import { formatFileSize, imageSaveSummary, presentTitle } from './utils/presentation'
 import { useVideoPage } from './composables/useVideoPage'
 import AppIcon from './components/AppIcon.vue'
 import ImageGallery from './components/ImageGallery.vue'
@@ -14,6 +14,9 @@ import MediaDownloadStatus from './components/MediaDownloadStatus.vue'
 const {
   input,
   loading,
+  pasting,
+  canPaste,
+  handlePaste,
   errorMessage,
   errorDiagnostics,
   copyingProblemInfo,
@@ -41,6 +44,7 @@ const {
   batchPartLimitMiB,
   batchDownloading,
   batchProgress,
+  batchProgressPercent,
   batchItems,
   batchCanRetry,
   batchFailed,
@@ -53,6 +57,7 @@ const {
   retryBatchDownload,
   videoDownloading,
   downloadStatus,
+  downloadProgress,
   downloadLabel,
   downloadState,
   downloadNeedsReparse,
@@ -84,6 +89,10 @@ const primarySaveElement = ref<HTMLElement>()
 const transferElement = ref<HTMLElement>()
 const coverFailed = ref(false)
 const title = computed(() => presentTitle(video.value?.title ?? ''))
+const videoSizeText = computed(() => formatFileSize(video.value?.videoSize))
+const videoMetaSummary = computed(() =>
+  [formatDuration(video.value?.duration), videoSizeText.value].filter(Boolean).join(' · '),
+)
 const safeSourceUrl = computed(() => {
   const url = video.value?.sourceUrl
   return url && isSafeHttpUrl(url) ? url : undefined
@@ -148,11 +157,15 @@ const mobileSummary = computed(() => {
   if (batchPart.value)
     return `第 ${batchPart.value.number} 包已就绪 · ${batchPart.value.count} 项文件`
   if (batchCanContinue.value) return '上一包已请求保存，可继续下载'
+  if (videoDownloading.value && downloadStatus.value) return downloadStatus.value
+  if (batchDownloading.value && batchProgress.value) return batchProgress.value
   if (downloadBusy.value) return '下载进行中，请保持页面打开'
   if (batchFailed.value) return '打包未完成，请查看下载任务'
   return video.value?.mediaType === 'image'
     ? saveSummary.value || '暂无可下载资源'
-    : ['视频', formatDuration(video.value?.duration)].filter(Boolean).join(' · ')
+    : ['视频', formatDuration(video.value?.duration), videoSizeText.value]
+        .filter(Boolean)
+        .join(' · ')
 })
 function showDownloadDetails() {
   const target =
@@ -198,6 +211,10 @@ function submitOnEnter(event: KeyboardEvent) {
   event.preventDefault()
   void handleParse()
 }
+async function onPaste() {
+  const started = await handlePaste()
+  if (!started) inputElement.value?.focus()
+}
 function saveAll() {
   return saveMode.value === 'motion' ? handleDownloadAllPreferred() : handleDownloadAllOriginals()
 }
@@ -214,7 +231,10 @@ function platformName(platform: VideoInfo['platform']) {
 </script>
 
 <template>
-  <main class="page-shell" :class="{ 'has-download-bar': video && !editingInput }">
+  <main
+    class="page-shell"
+    :class="{ 'has-download-bar': video && !editingInput, 'has-result': !!video }"
+  >
     <Transition name="toast">
       <div v-if="notice" class="toast-message" role="status">{{ notice }}</div>
     </Transition>
@@ -242,21 +262,35 @@ function platformName(platform: VideoInfo['platform']) {
           @blur="editingInput = false"
           @keydown="submitOnEnter"
         />
-        <button
-          v-if="input && !loading"
-          type="button"
-          class="clear-input icon-button"
-          aria-label="清空链接与解析结果"
-          @click="handleClear"
-        >
-          <AppIcon name="close" />
-        </button>
-        <button class="parse-button" type="submit" :disabled="!canSubmit">
-          <span v-if="loading" class="button-spinner" aria-hidden="true" /><span>{{
-            loading ? '正在解析' : '解析链接'
-          }}</span
-          ><AppIcon v-if="!loading" name="arrow" />
-        </button>
+        <div class="input-actions">
+          <button
+            v-if="input && !loading"
+            type="button"
+            class="clear-input icon-button"
+            aria-label="清空链接与解析结果"
+            @click="handleClear"
+          >
+            <AppIcon name="close" />
+          </button>
+          <button
+            v-else-if="canPaste && !loading"
+            type="button"
+            class="paste-input"
+            aria-label="粘贴剪贴板中的分享链接"
+            :disabled="pasting"
+            @click="onPaste"
+          >
+            <span v-if="pasting" class="button-spinner" aria-hidden="true" />
+            <AppIcon v-else name="clipboard" />
+            <span>粘贴</span>
+          </button>
+          <button class="parse-button" type="submit" :disabled="!canSubmit">
+            <span v-if="loading" class="button-spinner" aria-hidden="true" /><span>{{
+              loading ? '正在解析' : '解析链接'
+            }}</span
+            ><AppIcon v-if="!loading" name="arrow" />
+          </button>
+        </div>
       </div>
       <div v-if="loading" class="parse-progress" role="status">
         <span>{{
@@ -326,7 +360,7 @@ function platformName(platform: VideoInfo['platform']) {
         </div>
         <div class="image-caption">
           <span>{{ platformName(video.platform) }} · {{ mediaLabel }}</span
-          ><span v-if="formatDuration(video.duration)">{{ formatDuration(video.duration) }}</span>
+          ><span v-if="videoMetaSummary">{{ videoMetaSummary }}</span>
         </div>
       </section>
 
@@ -350,6 +384,7 @@ function platformName(platform: VideoInfo['platform']) {
         <div v-if="video.mediaType !== 'image'" class="work-meta">
           <span><AppIcon name="film" />{{ platformName(video.platform) }}视频</span>
           <span v-if="formatDuration(video.duration)">{{ formatDuration(video.duration) }}</span>
+          <span v-if="videoSizeText">{{ videoSizeText }}</span>
         </div>
         <p v-if="previewing" class="download-tip">画质与资源检查完成后即可下载。</p>
 
@@ -533,6 +568,7 @@ function platformName(platform: VideoInfo['platform']) {
             "
             :message="batchProgress"
             :busy="batchDownloading"
+            :progress="batchProgressPercent"
             :state="batchFailed ? 'failed' : undefined"
           >
             <template #actions>
@@ -617,6 +653,7 @@ function platformName(platform: VideoInfo['platform']) {
             :message="downloadStatus"
             :state="downloadState"
             :busy="videoDownloading"
+            :progress="downloadProgress"
           >
             <template #actions>
               <button

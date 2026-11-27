@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { imageSaveSummary, presentTitle } from '../frontend/src/utils/presentation'
+import { formatFileSize, imageSaveSummary, presentTitle } from '../frontend/src/utils/presentation'
 
 test('separates hashtags without dropping text after them or duplicating tags', () => {
   expect(presentTitle('三星为目，照见古今。 #王者荣耀cos #少司缘 后续正文 #少司缘')).toEqual({
@@ -24,4 +24,15 @@ test('save summary counts actual targets, including live-only and missing resour
   expect(imageSaveSummary(video, false)).toBe('2 张高清原图')
   expect(imageSaveSummary({ images: [{ url: '', livePhotoUrl: 'live.mp4' }] }, false)).toBe('')
   expect(imageSaveSummary(null, true)).toBe('')
+})
+
+test('formats positive video file sizes consistently in KB and MB', () => {
+  expect(formatFileSize()).toBe('')
+  expect(formatFileSize(0)).toBe('')
+  expect(formatFileSize(-10)).toBe('')
+  expect(formatFileSize(500)).toBe('1 KB')
+  expect(formatFileSize(512 * 1024)).toBe('512 KB')
+  expect(formatFileSize(1024 * 1024)).toBe('1.0 MB')
+  expect(formatFileSize(Math.round(18.4 * 1024 * 1024))).toBe('18.4 MB')
+  expect(formatFileSize(129 * 1024 * 1024)).toBe('129 MB')
 })

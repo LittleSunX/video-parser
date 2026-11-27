@@ -190,11 +190,66 @@ p {
   background: var(--paper);
   color: var(--ink);
 }
+.input-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
 .clear-input {
   color: var(--muted);
-  width: 32px;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
   background: transparent;
   flex-shrink: 0;
+  transition:
+    background-color 0.16s,
+    color 0.16s;
+}
+.clear-input:hover:not(:disabled) {
+  background: var(--soft);
+  color: var(--ink);
+}
+.paste-input {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: 6px;
+  background: var(--page);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+    background-color 0.16s,
+    color 0.16s;
+}
+.paste-input .app-icon {
+  width: 14px;
+  height: 14px;
+}
+.paste-input .button-spinner {
+  width: 13px;
+  height: 13px;
+  border-color: var(--line);
+  border-top-color: var(--accent);
+}
+.paste-input:hover:not(:disabled) {
+  background: var(--soft);
+  color: var(--ink);
+}
+.paste-input:active:not(:disabled) {
+  background: var(--line);
+  color: var(--ink);
+}
+.paste-input:focus-visible {
+  outline-offset: 2px;
 }
 .input-hint {
   margin: 12px 1px 0;
@@ -312,6 +367,27 @@ p {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  transition: opacity 0.16s;
+}
+.image-zoom-target img.is-loading {
+  opacity: 0.45;
+}
+.image-loading-indicator {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #ffffffed;
+  box-shadow: 0 2px 8px #00000012;
+  pointer-events: none;
+}
+.image-loading-indicator .button-spinner {
+  border-color: var(--line);
+  border-top-color: var(--accent);
 }
 .media-placeholder {
   display: flex;
@@ -394,6 +470,9 @@ p {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
   gap: 8px;
+  max-height: 176px;
+  overflow-y: auto;
+  padding: 2px;
 }
 .thumbnail {
   position: relative;
@@ -688,12 +767,20 @@ p {
   display: flex;
   align-items: center;
   gap: 11px;
-  width: 100%;
-  margin-top: 22px;
-  padding: 18px 0 10px;
+  width: calc(100% + 16px);
+  margin: 20px -8px 0;
+  padding: 16px 8px 12px;
   border-top: 1px solid var(--line);
+  border-radius: 0 0 8px 8px;
   background: transparent;
   text-align: left;
+  transition: background-color 0.15s;
+}
+.music-download:hover:not(:disabled) {
+  background: var(--page);
+}
+.music-download:hover:not(:disabled) > .app-icon {
+  color: var(--ink);
 }
 .music-icon {
   display: grid;
@@ -999,7 +1086,7 @@ p {
 }
 .dialog-media {
   position: relative;
-  height: min(72dvh, 850px);
+  height: min(70dvh, calc(100dvh - 180px), 850px);
   min-height: 140px;
   border-radius: 8px;
   background: var(--page);
@@ -1011,11 +1098,31 @@ p {
   height: 100%;
   object-fit: contain;
 }
-.dialog-hint {
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
   margin-top: 14px;
+}
+.dialog-hint {
   color: var(--muted);
-  text-align: center;
   font-size: 12px;
+}
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dialog-actions .secondary-button {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.dialog-actions .app-icon {
+  width: 15px;
+  height: 15px;
 }
 @keyframes spin {
   to {
@@ -1107,15 +1214,34 @@ p {
     font-size: 30px;
     margin-top: 8px;
   }
+  .has-result .hero {
+    margin-bottom: 12px;
+  }
+  .has-result .hero .eyebrow {
+    display: none;
+  }
+  .has-result .hero h1 {
+    font-size: 22px;
+    margin-top: 0;
+  }
   .platform-support {
     display: none;
   }
   .input-row {
-    padding: 7px 8px 7px 13px;
+    padding: 7px 8px 7px 12px;
     gap: 8px;
+  }
+  .input-row > .app-icon {
+    display: none;
   }
   .input-row textarea {
     font-size: 16px;
+  }
+  .input-row textarea::placeholder {
+    font-size: 14px;
+  }
+  .input-actions {
+    gap: 8px;
   }
   .parse-button {
     padding: 12px;
@@ -1125,7 +1251,12 @@ p {
     display: none;
   }
   .clear-input {
-    width: 28px;
+    width: 32px;
+    height: 32px;
+  }
+  .paste-input {
+    padding: 0 9px;
+    gap: 4px;
   }
   .result-card {
     grid-template-columns: minmax(0, 1fr);
@@ -1149,6 +1280,7 @@ p {
   .thumbnails {
     grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
     gap: 6px;
+    max-height: 152px;
   }
   .thumbnail {
     height: 68px;
@@ -1206,7 +1338,18 @@ p {
     max-height: calc(100dvh - 20px);
   }
   .dialog-media {
-    height: 70dvh;
+    height: min(64dvh, calc(100dvh - 190px));
+  }
+  .dialog-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .dialog-hint {
+    text-align: center;
+  }
+  .dialog-actions {
+    justify-content: center;
   }
 }
 @media (max-width: 420px) {
@@ -1216,6 +1359,9 @@ p {
   }
   .hero .eyebrow {
     font-size: 11px;
+  }
+  .paste-input {
+    padding: 0 8px;
   }
   .result-card {
     padding: 14px;
@@ -1297,6 +1443,11 @@ p {
   }
   .clear-input {
     min-width: 32px;
+  }
+  .paste-input::after {
+    content: '';
+    position: absolute;
+    inset: -5px -2px;
   }
 }
 @media (max-width: 360px) {

@@ -103,6 +103,7 @@ export function useMediaDownloads(
   })
   const videoDownloading = ref(false)
   const downloadStatus = ref('')
+  const downloadProgress = ref<number | undefined>(undefined)
   const downloadLabel = ref('视频')
   const downloadState = ref<'receiving' | 'handed-off' | 'fallback' | 'cancelled' | 'failed'>(
     'receiving',
@@ -127,6 +128,7 @@ export function useMediaDownloads(
     const requestNumber = ++nativeRequestNumber
     downloadLabel.value = label
     downloadNeedsReparse.value = false
+    downloadProgress.value = undefined
     downloadState.value = 'fallback'
     downloadStatus.value = message + '，请查看浏览器下载列表。'
     showNotice(downloadStatus.value, 6000)
@@ -213,6 +215,7 @@ export function useMediaDownloads(
     downloadLabel.value = label
     downloadState.value = 'receiving'
     downloadNeedsReparse.value = false
+    downloadProgress.value = undefined
     downloadStatus.value = '正在连接下载…'
     let nativeUrl = url
     try {
@@ -226,9 +229,12 @@ export function useMediaDownloads(
         totalTimeoutMs: 0,
         onProgress(received, total) {
           if (downloadController !== controller) return
-          downloadStatus.value = total
-            ? '正在下载 ' + Math.min(100, Math.round((received / total) * 100)) + '%'
-            : '已接收 ' + (received / 1024 / 1024).toFixed(1) + ' MB'
+          const percent = total ? Math.min(100, Math.round((received / total) * 100)) : undefined
+          downloadProgress.value = percent
+          downloadStatus.value =
+            percent !== undefined
+              ? '正在下载 ' + percent + '%'
+              : '已接收 ' + (received / 1024 / 1024).toFixed(1) + ' MB'
         },
       })
       if (downloadController !== controller) return
@@ -254,6 +260,7 @@ export function useMediaDownloads(
       if (downloadController === controller) {
         releaseVideoBuffer = undefined
         downloadController = undefined
+        downloadProgress.value = undefined
         videoDownloading.value = false
       }
     }
@@ -281,6 +288,7 @@ export function useMediaDownloads(
     videoPrepared.clear()
     bufferBudget.retain(videoOwner, 0)
     videoDownloading.value = false
+    downloadProgress.value = undefined
     downloadState.value = 'cancelled'
     downloadStatus.value = '已取消下载'
   }
@@ -345,6 +353,7 @@ export function useMediaDownloads(
     ...batch,
     videoDownloading,
     downloadStatus,
+    downloadProgress,
     downloadLabel,
     downloadState,
     downloadNeedsReparse,

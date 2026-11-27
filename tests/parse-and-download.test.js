@@ -5,7 +5,13 @@ import assert from 'node:assert/strict'
 import { effectScope } from 'vue'
 import { useVideoPage } from '../frontend/src/composables/useVideoPage'
 import { parseVideo as apiParseVideo } from '../frontend/src/api/video'
-import { copyText, openDirectDownload, triggerDownload } from '../frontend/src/utils/download'
+import {
+  canReadClipboard,
+  copyText,
+  openDirectDownload,
+  readClipboardText,
+  triggerDownload,
+} from '../frontend/src/utils/download'
 import * as mediaArchive from '../frontend/src/utils/media-archive'
 import { PREPARED_DOWNLOAD_TTL_MS } from '../frontend/src/utils/prepared-download'
 import { VIDEO_BUFFER_BYTES } from '../frontend/src/utils/download-buffer'
@@ -13,6 +19,8 @@ import { MediaDownloadError } from '../frontend/src/utils/download-error'
 
 vi.mock('../frontend/src/api/video', () => ({ parseVideo: vi.fn() }))
 vi.mock('../frontend/src/utils/download', () => ({
+  canReadClipboard: vi.fn(() => true),
+  readClipboardText: vi.fn(),
   copyText: vi.fn(),
   openDirectDownload: vi.fn(),
   triggerDownload: vi.fn(),
@@ -1530,4 +1538,78 @@ test('switching single images resets the target and clearing aborts without fall
   assert.equal(app.bufferBusy.value, false)
   assert.deepEqual(downloads, [])
   assert.equal(clicks.length, 1)
+})
+
+test('video and batch downloads expose determinate progress and clear it afterward', async () => {
+  mockBrowserSave()
+  const videoObserved = []
+  global.fetch = async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2]))
+          controller.enqueue(new Uint8Array([3, 4]))
+          controller.close()
+        },
+      }),
+      { headers: { 'Content-Type': 'video/mp4', 'Content-Length': '4' } },
+    )
+  const { app } = createApp()
+  app.video.value = { mediaType: 'video', videoUrl: 'https://cdn/video.mp4' }
+  const videoPromise = app.handleDownloadVideo()
+  await vi.waitFor(() => {
+    if (app.downloadProgress.value !== undefined) videoObserved.push(app.downloadProgress.value)
+    assert.equal(app.videoDownloading.value, false)
+  })
+  await videoPromise
+  assert.equal(app.downloadProgress.value, undefined)
+  assert.equal(videoObserved.length > 0 || app.downloadState.value === 'handed-off', true)
+
+  let releaseSecond
+  const secondGate = new Promise((resolve) => {
+    releaseSecond = resolve
+  })
+  global.fetch = async (request) => {
+    if (request.endsWith('/2')) await secondGate
+    return new Response(new Uint8Array([1, 2]), {
+      headers: { 'Content-Type': 'image/jpeg', 'Content-Length': '2' },
+    })
+  }
+  app.video.value = {
+    mediaType: 'image',
+    images: [{ url: 'https://image/1' }, { url: 'https://image/2' }],
+  }
+  const batchPromise = app.handleDownloadAllOriginals()
+  await vi.waitFor(() => assert.equal(app.batchProgressPercent.value, 50))
+  releaseSecond()
+  await batchPromise
+  assert.equal(app.batchProgressPercent.value, undefined)
+})
+
+test('quick paste auto-parses URLs, keeps plain text editable and handles denial safely', async () => {
+  vi.mocked(canReadClipboard).mockReturnValue(true)
+  const parseMock = vi.fn(async () => ({
+    mediaType: 'video',
+    videoId: id,
+    videoUrl: 'https://cdn/video.mp4',
+  }))
+  const { app } = createApp(parseMock)
+  assert.equal(app.canPaste.value, true)
+
+  vi.mocked(readClipboardText).mockResolvedValueOnce('纯文本没有链接')
+  assert.equal(await app.handlePaste(), false)
+  assert.equal(app.input.value, '纯文本没有链接')
+  assert.equal(parseMock.mock.calls.length, 0)
+  assert.equal(app.canPaste.value, false)
+
+  app.handleClear()
+  vi.mocked(readClipboardText).mockResolvedValueOnce('复制打开抖音 ' + url)
+  assert.equal(await app.handlePaste(), true)
+  await vi.waitFor(() => assert.equal(parseMock.mock.calls.length, 1))
+  assert.equal(app.video.value?.videoId, id)
+
+  app.handleClear()
+  vi.mocked(readClipboardText).mockRejectedValueOnce(new Error('denied'))
+  assert.equal(await app.handlePaste(), false)
+  assert.match(app.notice.value, /手动粘贴/)
 })
