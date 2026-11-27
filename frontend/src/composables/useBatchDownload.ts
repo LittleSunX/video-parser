@@ -54,6 +54,15 @@ export function useBatchDownload({
   const pendingBatch = computed(() => !!batchPart.value || batchCanContinue.value)
   const batchProgress = ref('')
   const batchItems = ref<BatchItemStatus[]>([])
+  const batchProgressPercent = computed(() => {
+    if (!batchDownloading.value || !batchItems.value.length) return undefined
+    const completed = batchItems.value.filter(
+      (item) => item.state === 'ready' || item.state === 'packed',
+    ).length
+    return completed > 0
+      ? Math.min(100, Math.round((completed / batchItems.value.length) * 100))
+      : undefined
+  })
   const batchHasCache = ref(false)
   let batchSession: BatchSession | undefined
   let batchKey = ''
@@ -260,6 +269,7 @@ export function useBatchDownload({
     batchPartLimitMiB: ZIP_PART_SOURCE_BYTES / 1024 / 1024,
     batchDownloading,
     batchProgress,
+    batchProgressPercent,
     batchItems,
     batchCanRetry,
     batchFailed,

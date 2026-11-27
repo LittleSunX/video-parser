@@ -6,7 +6,7 @@ import {
   serializeParseDiagnostics,
   type ParseDiagnostics,
 } from '../api/parse-error'
-import { copyText } from '../utils/download'
+import { canReadClipboard, copyText, readClipboardText } from '../utils/download'
 import type { VideoInfo } from '../types/video'
 import { useNotice } from './useNotice'
 import { imageDownloadLabel, imageDownloadTargets, useMediaDownloads } from './useMediaDownloads'
@@ -18,6 +18,8 @@ export function useVideoPage() {
   const errorDiagnostics = shallowRef<ParseDiagnostics>()
   const copyingProblemInfo = ref(false)
   let copyRequestNumber = 0
+  const pasting = ref(false)
+  let pasteRequestNumber = 0
   const video = ref<VideoInfo | null>(null)
   const previewing = ref(false)
   const { notice, showNotice, clearNotice } = useNotice()
@@ -35,6 +37,7 @@ export function useVideoPage() {
   } = downloads
   let parseController: AbortController | undefined
   const canSubmit = computed(() => input.value.trim().length > 0 && !loading.value)
+  const canPaste = computed(() => !input.value && !loading.value && canReadClipboard())
   const livePhotoCount = computed(
     () => video.value?.images?.filter((image) => !!image.livePhotoUrl).length ?? 0,
   )
@@ -71,6 +74,8 @@ export function useVideoPage() {
   async function handleParse() {
     if (!canSubmit.value) return
 
+    pasteRequestNumber++
+    pasting.value = false
     resetProblemInfo()
     const started = performance.now()
     stopBatchDownload()
@@ -148,6 +153,8 @@ export function useVideoPage() {
   }
 
   function handleClear() {
+    pasteRequestNumber++
+    pasting.value = false
     resetProblemInfo()
     parseController?.abort()
     parseController = undefined
@@ -188,7 +195,38 @@ export function useVideoPage() {
     }
   }
 
+  async function handlePaste(): Promise<boolean> {
+    if (loading.value || pasting.value) return false
+    const requestNumber = ++pasteRequestNumber
+    pasting.value = true
+    let text: string
+    try {
+      text = (await readClipboardText()).trim()
+    } catch {
+      if (requestNumber === pasteRequestNumber) {
+        pasting.value = false
+        showNotice('无法读取剪贴板，请长按输入框手动粘贴', 5000)
+      }
+      return false
+    }
+    if (requestNumber !== pasteRequestNumber || loading.value) return false
+    pasting.value = false
+    if (!text) {
+      showNotice('剪贴板为空，请先复制分享链接')
+      return false
+    }
+    input.value = text
+    if (/https?:\/\/[^\s<>"']+/i.test(text)) {
+      void handleParse()
+      return true
+    }
+    showNotice('已粘贴内容，请补充作品分享链接后解析')
+    return false
+  }
+
   onScopeDispose(() => {
+    pasteRequestNumber++
+    pasting.value = false
     resetProblemInfo()
     parseController?.abort()
     parseController = undefined
@@ -196,6 +234,9 @@ export function useVideoPage() {
   return {
     input,
     loading,
+    pasting,
+    canPaste,
+    handlePaste,
     errorMessage,
     errorDiagnostics,
     copyingProblemInfo,

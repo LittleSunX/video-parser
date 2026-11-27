@@ -252,7 +252,11 @@ test.describe('Android download entry', () => {
   }) => {
     test.skip(browserName !== 'chromium', 'Android Chrome uses Chromium')
     const calls = await setup(page, {
-      result: { ...video(), videoUrlAlternatives: [media('same-quality.mp4')] },
+      result: {
+        ...video(),
+        videoSize: Math.round(18.4 * 1024 * 1024),
+        videoUrlAlternatives: [media('same-quality.mp4')],
+      },
       direct: (route, url) =>
         route.fulfill({
           status: url.pathname === '/same-quality.mp4' ? 200 : 403,
@@ -264,14 +268,43 @@ test.describe('Android download entry', () => {
         }),
     })
     await parse(page)
-    const action = page
-      .getByRole('region', { name: '快捷下载' })
-      .getByRole('button', { name: '下载视频', exact: true })
+    const bar = page.getByRole('region', { name: '快捷下载' })
+    await expect(bar).toContainText('18.4 MB')
+    await expect(page.locator('.hero .eyebrow')).toBeHidden()
+    expect(
+      await page.evaluate(
+        () => globalThis.document.documentElement.scrollWidth <= globalThis.window.innerWidth,
+      ),
+    ).toBe(true)
+    const action = bar.getByRole('button', { name: '下载视频', exact: true })
     const file = await download(page, action)
     expect(file.bytes).toEqual(videoBytes)
     expect(calls.direct).toEqual(['/123456789.mp4', '/same-quality.mp4'])
     expect(calls.proxy).toEqual([])
   })
+})
+
+test('desktop gallery supports keyboard navigation and saving from the zoom dialog', async ({
+  page,
+}) => {
+  await setup(page, {
+    result: {
+      ...gallery(),
+      images: [
+        { url: media('1.png'), watermarkFree: true },
+        { url: media('2.png'), watermarkFree: true, livePhotoUrl: media('2.mp4') },
+      ],
+    },
+  })
+  await parse(page)
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('region', { name: '图文浏览' })).toContainText('02')
+  await page.getByRole('button', { name: '放大查看当前图片' }).click()
+  const dialog = page.getByRole('dialog', { name: '图片放大预览' })
+  await expect(dialog).toBeVisible()
+  const file = await download(page, dialog.getByRole('button', { name: '保存第 2 项动态 MP4' }))
+  expect(file.bytes).toEqual(videoBytes)
+  await expect(dialog).toBeHidden()
 })
 
 test('cancelled download releases the UI and a fresh download can finish', async ({ page }) => {
