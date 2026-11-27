@@ -1,13 +1,12 @@
+import { MAX_PARSE_BODY_BYTES, MAX_PARSE_INPUT_LENGTH } from '../../../shared/parse-request.mjs'
 import { AppError } from '../errors/app-error'
-
-const MAX_BODY_BYTES = 32 * 1024
 
 export async function readParseInput(request: Request): Promise<string> {
   const contentType = request.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase()
   if (contentType !== 'application/json' && contentType !== 'application/x-www-form-urlencoded') {
     throw new AppError('INVALID_CONTENT_TYPE', '请使用 JSON 或表单格式提交分享链接', 415)
   }
-  if (Number(request.headers.get('Content-Length')) > MAX_BODY_BYTES) {
+  if (Number(request.headers.get('Content-Length')) > MAX_PARSE_BODY_BYTES) {
     throw new AppError('INPUT_TOO_LARGE', '输入内容过长，请只粘贴作品分享链接', 413)
   }
   if (!request.body) throw new AppError('INVALID_INPUT', '请输入作品分享链接')
@@ -20,7 +19,7 @@ export async function readParseInput(request: Request): Promise<string> {
       const { done, value } = await reader.read()
       if (done) break
       size += value.byteLength
-      if (size > MAX_BODY_BYTES) {
+      if (size > MAX_PARSE_BODY_BYTES) {
         await reader.cancel()
         throw new AppError('INPUT_TOO_LARGE', '输入内容过长，请只粘贴作品分享链接', 413)
       }
@@ -46,7 +45,7 @@ export async function readParseInput(request: Request): Promise<string> {
   if (typeof input !== 'string' || !input.trim()) {
     throw new AppError('INVALID_INPUT', '请输入有效的作品分享链接或分享文案')
   }
-  if (input.length > 5000) {
+  if (input.length > MAX_PARSE_INPUT_LENGTH) {
     throw new AppError('INPUT_TOO_LARGE', '输入内容过长，请只粘贴作品分享链接', 413)
   }
   return input.trim()

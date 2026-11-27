@@ -156,6 +156,19 @@ test('upstream error response body is released and network failures have a disti
   expect(payload.error.message).not.toContain('internal')
 })
 
+test('a declared zero-length response is rejected before returning an attachment', async () => {
+  const cancel = vi.fn()
+  global.fetch = async () =>
+    new Response(new ReadableStream({ cancel }), {
+      headers: { 'Content-Type': 'video/mp4', 'Content-Length': ' 000\t' },
+    })
+  const response = await worker.fetch(request(), env)
+  expect(response.status).toBe(502)
+  expect(response.headers.get('Content-Disposition')).toBeNull()
+  expect((await response.json()).error.code).toBe('DOWNLOAD_FAILED')
+  expect(cancel).toHaveBeenCalledOnce()
+})
+
 test('redirects share a single response deadline', async () => {
   vi.useFakeTimers()
   global.fetch = vi.fn(async (_url, options) => {

@@ -108,7 +108,8 @@ export async function fetchMedia(
     ) {
       throw new AppError('MEDIA_UNAVAILABLE', '上游返回的内容不是媒体文件', 422)
     }
-    if (!upstream.body) throw new AppError('DOWNLOAD_FAILED', '媒体响应为空', 502)
+    if (!upstream.body || /^0+$/.test(upstream.headers.get('Content-Length')?.trim() ?? ''))
+      throw new AppError('DOWNLOAD_FAILED', '媒体响应为空', 502)
     const fullRange = range ? undefined : validateFullMediaRange(upstream)
     if (fullRange?.valid === false) throw new AppError('DOWNLOAD_FAILED', '媒体响应不完整', 502)
     clearTimeout(timer)
@@ -197,6 +198,7 @@ function guardMediaStream(
         clearTimeout(timer)
         if (ended) return
         if (done) {
+          if (!received) throw new AppError('DOWNLOAD_FAILED', '媒体响应为空', 502)
           if (expectedLength !== undefined && received !== expectedLength)
             throw new AppError('DOWNLOAD_FAILED', '媒体响应不完整', 502)
           finish()
@@ -209,9 +211,13 @@ function guardMediaStream(
             throw new AppError('DOWNLOAD_FAILED', '媒体响应超出声明范围', 502)
           controller.enqueue(value)
         }
-      } catch {
+      } catch (error) {
         if (!ended)
-          abortController.abort(new AppError('DOWNLOAD_NETWORK_ERROR', '媒体传输中断', 502))
+          abortController.abort(
+            error instanceof AppError
+              ? error
+              : new AppError('DOWNLOAD_NETWORK_ERROR', '媒体传输中断', 502),
+          )
       }
     },
     cancel() {

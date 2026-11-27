@@ -5,6 +5,7 @@ import {
   downloadMediaArchive,
   createBatchSession,
   clearBatchSession,
+  resetUnsavedBatchPart,
   saveArchivePart,
   type BatchSession,
   type BatchItemStatus,
@@ -65,10 +66,19 @@ export function useBatchDownload({
 
   function expireBatchFiles() {
     bufferBudget.retain(batchOwner, 0)
-    if (batchSession?.part || batchSession?.files.size) {
-      stopBatchDownload()
-      batchProgress.value = '当前包暂存已到期，请重新准备下载。'
-    }
+    const session = batchSession
+    if (!session || (!session.part && !session.files.size)) return
+    const keepFailure = phase.value.kind === 'failed' && !phase.value.retryable
+    if (session.savedThroughIndex > 0 || keepFailure) {
+      const failedIndex = session.nextIndex
+      const failedItem = session.items[failedIndex]
+      resetUnsavedBatchPart(session)
+      if (keepFailure && failedItem?.state === 'failed') session.items[failedIndex] = failedItem
+      if (phase.value.kind === 'ready') phase.value = { kind: 'continuable' }
+      batchItems.value = session.items.map((item) => ({ ...item }))
+      batchHasCache.value = false
+    } else stopBatchDownload()
+    if (!keepFailure) batchProgress.value = '当前包暂存已到期，请重新准备下载。'
   }
 
   function prepareAndSaveBatch(blob: Blob, filename: string) {

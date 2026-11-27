@@ -40,6 +40,16 @@ afterEach(() => {
 })
 
 test.each([
+  ['?modal_id=&aweme_id=123', '123'],
+  ['?modal_id=12x&aweme_id=0.5&video_id=123', '123'],
+  ['?modal_id=NaN&modal_id=123&aweme_id=456', '123'],
+  ['?modal_id=123&aweme_id=456', '123'],
+  ['?modal_id=%20123&aweme_id=abc&video_id=-1', undefined],
+])('only decimal work IDs participate in query identity selection: %s', (query, expected) => {
+  expect(extractDouyinVideoId(new URL(shortUrl + query))).toBe(expected)
+})
+
+test.each([
   ['canonical', '<link rel="canonical" href="' + targetUrl + '">'],
   ['og:url', '<meta property="og:url" content="' + targetUrl + '">'],
   ['relative canonical', '<link href="/video/123" rel="canonical">'],
@@ -219,6 +229,7 @@ test('short-link redirects cannot escape to an unrelated host', async () => {
   vi.stubGlobal('fetch', fetch)
   await expect(resolveSupportedUrl(new URL(shortUrl))).rejects.toMatchObject({
     code: 'UNSUPPORTED_PLATFORM',
+    message: '目前支持抖音公开作品，请粘贴抖音分享链接',
   })
   expect(fetch).toHaveBeenCalledOnce()
 })

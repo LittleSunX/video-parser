@@ -202,6 +202,42 @@ test('exhausted direct mirrors launch only one proxy request with the refusal re
   await expect(page.getByRole('region', { name: '下载任务' })).toContainText('HTTP 403')
 })
 
+test('an oversized mirror takes over when the primary direct URL is denied', async ({ page }) => {
+  const mirror = media('same-quality.mp4')
+  const calls = await setup(page, {
+    result: { ...video(), videoUrlAlternatives: [mirror] },
+    direct: (route, url) =>
+      route.fulfill({
+        status: url.href === mirror ? 200 : 403,
+        body: videoBytes,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': 'video/mp4',
+          'Content-Length': String(129 * 1024 * 1024),
+        },
+      }),
+  })
+  await parse(page)
+  const file = await download(page, page.getByRole('button', { name: '下载视频', exact: true }))
+  expect(file.bytes).toEqual(videoBytes)
+  expect(calls.direct).toEqual(['/123456789.mp4', '/same-quality.mp4'])
+  expect(calls.proxy).toEqual([mirror])
+})
+
+test('known large files and the manual fallback use the selected mirror', async ({ page }) => {
+  const mirror = media('same-quality.mp4')
+  const calls = await setup(page, {
+    result: { ...video(), videoSize: 129 * 1024 * 1024, videoUrlAlternatives: [mirror] },
+  })
+  await parse(page)
+  await page.getByText('备用下载与直链', { exact: true }).click()
+  await page.getByRole('button', { name: '切换直链（1/2）', exact: true }).click()
+  await download(page, page.getByRole('button', { name: '下载视频', exact: true }))
+  await download(page, page.getByRole('button', { name: '备用下载', exact: true }))
+  expect(calls.direct).toEqual([])
+  expect(calls.proxy).toEqual([mirror, mirror])
+})
+
 test.describe('Android download entry', () => {
   test.use({
     viewport: devices['Pixel 7'].viewport,
@@ -279,8 +315,11 @@ test('gallery ZIP contains every original image and can be saved again', async (
   expect(again).toEqual(file)
 })
 
-test('large gallery saves consecutive ZIP parts without repeating an image', async ({ page }) => {
-  await setup(page, {
+test('large gallery resumes the next ZIP part after its prepared file expires', async ({
+  page,
+}) => {
+  await page.clock.install()
+  const calls = await setup(page, {
     result: gallery(true),
     direct: (route, url) =>
       route.fulfill({
@@ -291,8 +330,16 @@ test('large gallery saves consecutive ZIP parts without repeating an image', asy
   await parse(page)
   await page.getByRole('button', { name: '打包下载全部', exact: true }).click()
   const first = await download(page, page.getByRole('button', { name: /^保存第 1 包/ }))
-  await page.getByRole('button', { name: '继续准备下一包', exact: true }).click()
-  const second = await download(page, page.getByRole('button', { name: /^保存第 2 包/ }))
+  const next = page.getByRole('button', { name: '继续准备下一包', exact: true })
+  const saveSecond = page.getByRole('button', { name: /^保存第 2 包/ })
+  await next.click()
+  await expect(saveSecond).toBeVisible()
+  const beforeExpiry = calls.direct.length
+  await page.clock.fastForward(30_001)
+  await expect(saveSecond).toHaveCount(0)
+  await next.click()
+  const second = await download(page, saveSecond)
+  expect(calls.direct.slice(beforeExpiry)).toEqual(['/large-2.png'])
   const entries = [unzipSync(first.bytes), unzipSync(second.bytes)]
   expect(new Set(entries.flatMap(Object.keys)).size).toBe(2)
   for (const [index, files] of entries.entries()) {

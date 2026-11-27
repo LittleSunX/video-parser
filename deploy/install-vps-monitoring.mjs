@@ -35,6 +35,7 @@ async function safeDirectory(path, create = false) {
   try {
     const info = await fs.lstat(path)
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Unsafe monitoring directory')
+    return info.mode & 0o7777
   } catch (error) {
     if (error.code !== 'ENOENT') throw error
     if (create) await fs.mkdir(path, { mode: 0o755 })
@@ -99,8 +100,10 @@ export async function prepareMonitoring(
     }
   }
   const etc = join(resolve(systemRoot), 'etc')
+  const programDirectory = join(root, 'monitor')
+  const programDirectoryMode = await safeDirectory(programDirectory)
   const specs = [
-    ['server/monitor.mjs', join(root, 'monitor/monitor.mjs')],
+    ['server/monitor.mjs', join(programDirectory, 'monitor.mjs')],
     ['operations/video-parser-monitor.service', join(etc, 'systemd/system', monitor)],
     ['operations/video-parser-monitor.timer', join(etc, 'systemd/system', timer)],
     [
@@ -137,11 +140,20 @@ export async function prepareMonitoring(
   }
   const written = []
   let started = false
+  let changedProgramMode = false
   let enableAttempted = false
   return {
     async install() {
       started = true
       await stopMonitor()
+      await safeDirectory(programDirectory, true)
+      // The dynamic user needs to traverse the program directory even after a restrictive umask.
+      // Existing directory modes keep their other bits; private configuration is handled separately.
+      const traversableMode = (programDirectoryMode ?? 0o755) | 0o011
+      if (process.platform !== 'win32' && traversableMode !== programDirectoryMode) {
+        await fs.chmod(programDirectory, traversableMode)
+        changedProgramMode = programDirectoryMode !== undefined
+      }
       for (const change of changes) {
         await replaceFile(change.path, change.after)
         written.push(change)
@@ -188,6 +200,7 @@ export async function prepareMonitoring(
         if (change.before) await replaceFile(change.path, change.before)
         else await fs.unlink(change.path)
       }
+      if (changedProgramMode) await fs.chmod(programDirectory, programDirectoryMode)
       await command(['daemon-reload'])
       await command([journalActive ? 'restart' : 'stop', journal])
       if (enabled === 'enabled') await command(['enable', timer])

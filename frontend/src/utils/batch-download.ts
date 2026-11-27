@@ -29,6 +29,7 @@ export interface BatchSession {
   files: Map<string, Blob>
   items: BatchItemStatus[]
   nextIndex: number
+  savedThroughIndex: number
   partNumber: number
   part?: ArchivePart
   maxPartBytes: number
@@ -41,6 +42,7 @@ export function createBatchSession(
   return {
     files: new Map(),
     nextIndex: 0,
+    savedThroughIndex: 0,
     partNumber: 1,
     maxPartBytes,
     items: jobs.map((job) => ({ filename: job.filename, state: 'pending', message: '等待获取' })),
@@ -52,6 +54,18 @@ export function clearBatchSession(session: BatchSession): void {
   session.part = undefined
 }
 
+export function resetUnsavedBatchPart(session: BatchSession): void {
+  clearBatchSession(session)
+  session.nextIndex = session.savedThroughIndex
+  for (let i = session.nextIndex; i < session.items.length; i++) {
+    session.items[i] = {
+      filename: session.items[i].filename,
+      state: 'pending',
+      message: '等待获取',
+    }
+  }
+}
+
 /** 必须由用户点击触发，逐包交给浏览器保存。 */
 export function saveArchivePart(
   session: BatchSession,
@@ -61,6 +75,7 @@ export function saveArchivePart(
   if (!part) return false
   save(part.blob, part.filename)
   session.part = undefined
+  session.savedThroughIndex = session.nextIndex
   session.partNumber++
   return part.final
 }

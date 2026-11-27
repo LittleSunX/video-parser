@@ -1,16 +1,19 @@
 import { isSafeHttpUrl } from '../../../../shared/video-contract'
 
 /** 优先使用上游已有的 HTTPS 候选，过滤无效地址，不改写仅有 HTTP 的签名地址。 */
-export function extractFirstUrl(input: unknown): string | undefined {
+export function extractFirstUrl(
+  input: unknown,
+  accepts?: (url: string) => boolean,
+): string | undefined {
   if (typeof input === 'string') {
     const value = normalizeUrl(input).trim()
-    return isSafeHttpUrl(value) ? value : undefined
+    return isSafeHttpUrl(value) && (!accepts || accepts(value)) ? value : undefined
   }
 
   if (Array.isArray(input)) {
     let fallback: string | undefined
     for (const value of input) {
-      const url = extractFirstUrl(value)
+      const url = extractFirstUrl(value, accepts)
       if (url && isSafeHttpUrl(url, true)) return url
       fallback ??= url
     }
@@ -24,7 +27,7 @@ export function extractFirstUrl(input: unknown): string | undefined {
     for (const key of ['url_list', 'urlList', 'url', 'src']) {
       if (!(key in object)) continue
 
-      const url = extractFirstUrl(object[key])
+      const url = extractFirstUrl(object[key], accepts)
       if (url && isSafeHttpUrl(url, true)) return url
       fallback ??= url
     }

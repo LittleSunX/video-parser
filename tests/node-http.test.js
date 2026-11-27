@@ -629,6 +629,16 @@ describe('shared core over real Node HTTP with an offline deterministic upstream
     ).rejects.toThrow()
   })
 
+  test('chunked media ending without any bytes aborts the HTTP download', async () => {
+    upstream = (_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'video/mp4', 'Transfer-Encoding': 'chunked' })
+      response.end()
+    }
+    await expect(
+      nativeFetch(origin + downloadPath()).then((response) => response.arrayBuffer()),
+    ).rejects.toThrow()
+  })
+
   test('an allowlisted media redirect preserves Range and identity on both real HTTP hops', async () => {
     const bytes = Buffer.from([0, 128, 255, 1])
     upstream = (request, response) => {

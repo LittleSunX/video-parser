@@ -172,29 +172,21 @@ export function useMediaDownloads(
   async function handleDownloadVideo() {
     const current = video.value
     if (!current?.videoUrl) return
+    const url = videoDirectUrl.value ?? current.videoUrl
     if (
       typeof current.videoSize === 'number' &&
       Number.isSafeInteger(current.videoSize) &&
       current.videoSize > VIDEO_BUFFER_BYTES
     ) {
-      startNativeDownload(
-        current.videoUrl,
-        buildVideoFilename(current),
-        '文件较大，已交给浏览器下载',
-      )
+      startNativeDownload(url, buildVideoFilename(current), '文件较大，已交给浏览器下载')
       return
     }
-    return downloadSingleVideo(
-      videoDirectUrl.value ?? current.videoUrl,
-      buildVideoFilename(current),
-      '视频',
-      {
-        alternativeUrls: videoDirectLinks.value,
-        onSourceReady(url) {
-          if (video.value === current) selectedVideoLink.value = { video: current, url }
-        },
+    return downloadSingleVideo(url, buildVideoFilename(current), '视频', {
+      alternativeUrls: videoDirectLinks.value,
+      onSourceReady(url) {
+        if (video.value === current) selectedVideoLink.value = { video: current, url }
       },
-    )
+    })
   }
 
   /** 普通视频与单个实况共用直连、进度、缓冲保存及代理回退。 */
@@ -222,10 +214,14 @@ export function useMediaDownloads(
     downloadState.value = 'receiving'
     downloadNeedsReparse.value = false
     downloadStatus.value = '正在连接下载…'
+    let nativeUrl = url
     try {
       const blob = await fetchMediaBlob(url, {
         signal: controller.signal,
         ...sources,
+        onSourceTooLarge(candidate) {
+          nativeUrl = candidate
+        },
         // 持续收到数据时不限总时长，连接和读取停滞仍由各自超时保护。
         totalTimeoutMs: 0,
         onProgress(received, total) {
@@ -251,7 +247,7 @@ export function useMediaDownloads(
       } else {
         release()
         releaseVideoBuffer = undefined
-        startNativeDownload(url, filename, directDownloadFallbackMessage(error), label)
+        startNativeDownload(nativeUrl, filename, directDownloadFallbackMessage(error), label)
       }
     } finally {
       release()
@@ -306,8 +302,10 @@ export function useMediaDownloads(
   }
 
   function handleProxyDownloadVideo() {
-    if (!video.value?.videoUrl || videoDownloading.value) return
-    startNativeDownload(video.value.videoUrl, buildVideoFilename(video.value), '已发起备用下载')
+    const current = video.value
+    const url = videoDirectUrl.value
+    if (!current || !url || videoDownloading.value) return
+    startNativeDownload(url, buildVideoFilename(current), '已发起备用下载')
   }
 
   function handleDownloadImage(index: number) {

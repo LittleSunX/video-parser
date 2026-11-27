@@ -80,6 +80,24 @@ test('keeps the highest quality stream and its size while selecting its HTTPS ad
   expect(result).toMatchObject({ videoUrl: high, videoSize: 200 })
 })
 
+test('equal-quality bitrate entries prefer a signed HTTPS stream over an earlier HTTP stream', () => {
+  const signed = https + '?signature=a%2Fb'
+  const result = mapItemToVideoInfo(
+    {
+      aweme_id: id,
+      video: {
+        bit_rate: [http, signed].map((url) => ({
+          bit_rate: 3000,
+          play_addr: { url_list: [url], width: 1080, height: 1920, data_size: 4096 },
+        })),
+      },
+    },
+    source,
+    id,
+  ).video
+  expect(result).toMatchObject({ videoUrl: signed, videoSize: 4096 })
+})
+
 test('the chosen HTTPS candidate can pass through the actual download handler', async () => {
   const fetch = vi.fn(
     async () =>
@@ -150,6 +168,16 @@ test.each([
   ['HTTP uri with HTTPS alternatives', { uri: http, url_list: [https] }, https],
   ['HTTPS uri with HTTPS alternatives', { uri: https, url_list: [https + '?backup=1'] }, https],
   ['HTTP-only uri', { uri: http }, http],
+  [
+    'MP3 mixed with a signed video',
+    { uri: http, url_list: ['https://sf3.douyinstatic.com/audio.mp3?token=example', https] },
+    https,
+  ],
+  [
+    'MP3 before an HTTPS video without a URI',
+    { url_list: ['https://sf3.douyinstatic.com/audio.mp3', https + '?name=file.mp3'] },
+    https + '?name=file.mp3',
+  ],
 ])('live photos retain the right candidate for %s', (_label, address, expected) => {
   expect(extractLivePhotoUrl({ video: { play_addr: address } })).toBe(expected)
 })

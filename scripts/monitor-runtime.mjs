@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { mkdir, open, rename, unlink } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { advanceAlerts, monitorConfig, validAlertState } from './monitoring/policy.mjs'
 import { observeLogs, probeHealth } from './monitoring/observations.mjs'
 
@@ -85,12 +86,12 @@ export async function runMonitor({
   lockDirectory = stateDirectory,
   logFile,
   journalNamespace,
-  now = Date.now(),
+  now,
   healthProbe = probeHealth,
   journal = collectJournal,
 }) {
   config = monitorConfig(config)
-  journalArguments(config, now, journalNamespace)
+  journalArguments(config, now ?? Date.now(), journalNamespace)
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 })
   await mkdir(lockDirectory, { recursive: true, mode: 0o700 })
   const lockPath = join(lockDirectory, 'monitor.lock')
@@ -109,27 +110,39 @@ export async function runMonitor({
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
     }
-    const [health, logs] = await Promise.all([
-      healthProbe(config.healthUrl),
-      (async () => {
+    const health = await healthProbe(config.healthUrl)
+    // Include this pass's health request even when the previous pass is outside the window.
+    let sampledAt = now ?? Date.now()
+    let logs
+    try {
+      if (logFile) {
+        const stream = createReadStream(logFile)
         try {
-          if (!logFile) return await journal(config, now, journalNamespace)
-          const stream = createReadStream(logFile)
-          try {
-            return await observeLogs(stream, { now, windowSeconds: config.windowSeconds })
-          } finally {
-            stream.destroy()
-          }
-        } catch {
-          return { ok: false, reason: 'collection_failed', versions: {} }
+          logs = await observeLogs(stream, { now: sampledAt, windowSeconds: config.windowSeconds })
+        } finally {
+          stream.destroy()
         }
-      })(),
-    ])
-    const observation = { at: now, health, logs }
+      } else {
+        logs = await journal(config, sampledAt, journalNamespace)
+        // journald can timestamp the API's stdout after the HTTP probe has already returned.
+        if (
+          health.ok &&
+          (logs.reason === 'no_usable_records' ||
+            (logs.ok && !Object.hasOwn(logs.versions ?? {}, health.version)))
+        ) {
+          await delay(250)
+          sampledAt = now ?? Date.now()
+          logs = await journal(config, sampledAt, journalNamespace)
+        }
+      }
+    } catch {
+      logs = { ok: false, reason: 'collection_failed', versions: {} }
+    }
+    const observation = { at: sampledAt, health, logs }
     const { state, alerts } = advanceAlerts(previous, observation, config)
     const report = {
       event: 'monitor_observation',
-      timestamp: new Date(now).toISOString(),
+      timestamp: new Date(sampledAt).toISOString(),
       windowSeconds: config.windowSeconds,
       health,
       logs,

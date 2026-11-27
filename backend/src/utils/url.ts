@@ -32,7 +32,7 @@ export function validateSupportedUrl(url: URL): void {
     url,
     SUPPORTED_HOST_SUFFIXES,
     'UNSUPPORTED_PLATFORM',
-    '当前第一版仅支持抖音链接',
+    '目前支持抖音公开作品，请粘贴抖音分享链接',
   )
 }
 
